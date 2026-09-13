@@ -13,6 +13,7 @@ import { IpVersionToggle } from "@/components/IpVersionToggle";
 import { MasqueTransportToggle } from "@/components/MasqueTransportToggle";
 import { NoizeProfileToggle } from "@/components/NoizeProfileToggle";
 import { BindAddressField } from "@/components/BindAddressField";
+import { HttpProxyField } from "@/components/HttpProxyField";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { useConnectionStore } from "@/state/connectionStore";
@@ -118,6 +119,12 @@ export function AdvancedPanel() {
               tooltip="The local address Aether's SOCKS5 proxy listens on. Change the port to avoid conflicts, or enable LAN to share the tunnel with other devices on your network."
             >
               <BindAddressField />
+            </FieldRow>
+            <FieldRow
+              label="HTTP/HTTPS Proxy"
+              tooltip="Exposes Aether's HTTP CONNECT proxy on its own port. HTTPS works through the same port (CONNECT tunneling) — the core has no separate HTTPS listener. Enable LAN to share it with other devices on your network."
+            >
+              <HttpProxyField />
             </FieldRow>
             <FieldRow
               label="Zero Trust (organization)"

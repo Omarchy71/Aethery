@@ -34,6 +34,8 @@ interface ConnectionState {
   setMasqueNoize: (masque_noize: MasqueNoize) => void;
   setWgNoize: (wg_noize: WgNoize) => void;
   setBindAddress: (bind_address: string) => void;
+  setHttpProxyEnabled: (http_proxy_enabled: boolean) => void;
+  setHttpProxyAddress: (http_proxy_address: string) => void;
   setDns: (dns: string) => void;
   setZeroTrustTeam: (zero_trust_team: string) => void;
   setZeroTrustAuth: (zero_trust_auth: ZeroTrustAuth) => void;
@@ -59,6 +61,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     masque_noize: "firewall",
     wg_noize: "balanced",
     bind_address: "127.0.0.1:1819",
+    http_proxy_enabled: false,
+    http_proxy_address: "127.0.0.1:1820",
     dns: "",
     zero_trust_team: "",
     zero_trust_auth: "email",
@@ -128,6 +132,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setBindAddress: (bind_address) =>
     set((s) => ({ profile: { ...s.profile, bind_address } })),
+
+  setHttpProxyEnabled: (http_proxy_enabled) =>
+    set((s) => ({ profile: { ...s.profile, http_proxy_enabled } })),
+
+  setHttpProxyAddress: (http_proxy_address) =>
+    set((s) => ({ profile: { ...s.profile, http_proxy_address } })),
 
   setDns: (dns) => set((s) => ({ profile: { ...s.profile, dns } })),
 

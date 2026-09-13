@@ -33,6 +33,11 @@ export interface ConnectionProfile {
   wg_noize: WgNoize;
   /** Local SOCKS5 listen address (--bind). Default 127.0.0.1:1819. */
   bind_address: string;
+  /** Expose the core's HTTP CONNECT proxy (--http-proxy). HTTPS is served
+   * through the same port via CONNECT. Off by default. */
+  http_proxy_enabled: boolean;
+  /** Listen address for the HTTP proxy. Default 127.0.0.1:1820. */
+  http_proxy_address: string;
   /** Aether ≥1.5.0: optional comma-separated DNS resolvers inside the tunnel. */
   dns: string;
   /** Cloudflare Zero Trust team. Empty keeps the normal consumer WARP flow. */

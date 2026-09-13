@@ -134,6 +134,16 @@ pub struct ConnectionProfile {
     /// 127.0.0.1:1819; users can change the port or bind to 0.0.0.0 for LAN.
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
+    /// Expose an HTTP CONNECT proxy (`--http-proxy`). HTTPS is served
+    /// through the same port via CONNECT — the core has no separate
+    /// HTTPS listener. Off by default.
+    #[serde(default)]
+    pub http_proxy_enabled: bool,
+    /// Listen address for the HTTP proxy, e.g. 127.0.0.1:1820 or
+    /// 0.0.0.0:1820 to share it on the LAN. Only sent when
+    /// `http_proxy_enabled` is set.
+    #[serde(default = "default_http_proxy_address")]
+    pub http_proxy_address: String,
     /// Aether ≥1.5.0: optional resolvers used *inside* the tunnel. Kept as
     /// Aether's comma-separated CLI format, for example `1.1.1.1,1.0.0.1`.
     #[serde(default)]
@@ -199,6 +209,10 @@ fn default_bind_address() -> String {
     "127.0.0.1:1819".into()
 }
 
+fn default_http_proxy_address() -> String {
+    "127.0.0.1:1820".into()
+}
+
 impl ConnectionProfile {
     /// CLI flags for Aether ≥1.1.1 — the whole profile is passed up front so
     /// the interactive prompts never appear (the PTY prompt-answering in
@@ -246,6 +260,17 @@ impl ConnectionProfile {
         {
             args.push("--bind".into());
             args.push(self.bind_address.clone());
+        }
+        // Only forward --http-proxy when explicitly enabled with a
+        // parseable address; HTTPS is served on the same port via CONNECT.
+        if self.http_proxy_enabled
+            && self
+                .http_proxy_address
+                .parse::<std::net::SocketAddr>()
+                .is_ok()
+        {
+            args.push("--http-proxy".into());
+            args.push(self.http_proxy_address.clone());
         }
         if !self.dns.trim().is_empty() {
             args.push("--dns".into());
@@ -437,6 +462,8 @@ impl Default for ConnectionProfile {
             masque_noize: MasqueNoize::Firewall,
             wg_noize: WgNoize::Balanced,
             bind_address: default_bind_address(),
+            http_proxy_enabled: false,
+            http_proxy_address: default_http_proxy_address(),
             dns: String::new(),
             zero_trust_team: String::new(),
             zero_trust_auth: ZeroTrustAuth::Email,
