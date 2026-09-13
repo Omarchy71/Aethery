@@ -24,6 +24,10 @@ pub enum ConnectionState {
     /// updating session timer without needing another event from the backend.
     Connected {
         socks_addr: String,
+        /// HTTP proxy listen address (same `host:port` format) when the
+        /// profile enables `--http-proxy`, else `None`. Shown in the UI so
+        /// a LAN-shared setup displays what it actually serves on.
+        http_addr: Option<String>,
         connected_at_ms: u64,
     },
     Reconnecting {

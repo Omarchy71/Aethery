@@ -117,6 +117,15 @@ pub fn start_connect(
         if status::port_is_live(&socks) {
             return Err(AetherError::PortInUse(socks.port()));
         }
+        // Same guard for the optional HTTP proxy: without it a busy HTTP
+        // port only surfaces later as a runtime core failure mid-launch.
+        if profile.http_proxy_enabled {
+            if let Ok(http) = profile.http_proxy_address.parse::<std::net::SocketAddr>() {
+                if status::port_is_live(&http) {
+                    return Err(AetherError::PortInUse(http.port()));
+                }
+            }
+        }
         mgr.state = ConnectionState::Launching;
         // A fresh user-initiated connect always gets a full retry budget,
         // independent of whatever happened on a previous, unrelated attempt.
@@ -310,6 +319,9 @@ fn monitor_connect(
         if status::port_is_live(&socks) {
             let new_state = ConnectionState::Connected {
                 socks_addr: profile.bind_address.clone(),
+                http_addr: profile
+                    .http_proxy_enabled
+                    .then(|| profile.http_proxy_address.clone()),
                 connected_at_ms: now_millis(),
             };
             mgr.state = new_state.clone();

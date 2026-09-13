@@ -49,11 +49,20 @@ fn kill_pid(pid: u32) {
 
 #[cfg(windows)]
 fn is_alive(pid: u32) -> bool {
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}")])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-        .unwrap_or(false)
+    // Exact PID match on the CSV's PID column: a substring search would
+    // mistake e.g. pid 123 for 1234 and could kill an unrelated process.
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    let pid = pid.to_string();
+    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+        line.split(',')
+            .nth(1)
+            .is_some_and(|f| f.trim_matches('"') == pid)
+    })
 }
 
 #[cfg(windows)]

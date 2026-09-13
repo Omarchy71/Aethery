@@ -119,10 +119,13 @@ export function ConnectionStatusLine() {
       primary = "Reconnecting…";
       secondary = `Attempt ${status.attempt} of ${status.max_attempts}`;
       break;
-    case "Connected":
+    case "Connected": {
       primary = "Connected";
-      secondary = elapsed;
+      const addrs = [`SOCKS ${status.socks_addr}`];
+      if (status.http_addr != null) addrs.push(`HTTP ${status.http_addr}`);
+      secondary = `${addrs.join(" · ")} · ${elapsed}`;
       break;
+    }
     case "Disconnecting":
       primary = "Disconnecting…";
       secondary = "";

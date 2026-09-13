@@ -5,7 +5,7 @@ export type ConnectionStatus =
   | { state: "Idle" }
   | { state: "Launching" }
   | { state: "Connecting" }
-  | { state: "Connected"; socks_addr: string; connected_at_ms: number }
+  | { state: "Connected"; socks_addr: string; http_addr: string | null; connected_at_ms: number }
   | { state: "Reconnecting"; attempt: number; max_attempts: number }
   | { state: "Disconnecting" }
   | { state: "Error"; message: string; phase: string };

@@ -152,7 +152,12 @@ pub fn spawn(
     let writer = Arc::new(Mutex::new(raw_writer));
     let writer_for_thread = Arc::clone(&writer);
 
-    let prompts_done = Arc::new(AtomicBool::new(false));
+    // The whole profile is passed as flags up front, so interactive setup
+    // is already complete at spawn — the prompt-answering below is purely
+    // a fallback for output-format drift. Starting "done" lets the monitor
+    // announce Connecting instead of sitting on Launching until the port
+    // goes live; the fallback answering logic is unaffected.
+    let prompts_done = Arc::new(AtomicBool::new(true));
     let prompts_done_for_thread = Arc::clone(&prompts_done);
 
     std::thread::spawn(move || {
