@@ -16,6 +16,7 @@ import { BindAddressField } from "@/components/BindAddressField";
 import { HttpProxyField } from "@/components/HttpProxyField";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
+import { StartupSettings } from "@/components/StartupSettings";
 import { useConnectionStore } from "@/state/connectionStore";
 
 function FieldRow({
@@ -137,6 +138,13 @@ export function AdvancedPanel() {
               tooltip="Optional Aether 1.5 controls for DNS inside the tunnel and rules that block a destination or send it directly outside the tunnel."
             >
               <RoutingSettings />
+            </FieldRow>
+
+            <FieldRow
+              label="Startup"
+              tooltip="Start on boot registers the app with the OS (Windows startup, Linux autostart, macOS login item). Auto-connect dials the tunnel automatically shortly after the app opens."
+            >
+              <StartupSettings />
             </FieldRow>
 
             <div className="flex items-center justify-between">

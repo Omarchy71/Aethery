@@ -54,6 +54,10 @@ export interface ConnectionProfile {
   route_block: string;
   route_direct: string;
   routes_file: string;
+  /** Start the app on OS boot (OS autostart entry). Off by default. */
+  autostart: boolean;
+  /** Connect automatically shortly after launch. Off by default. */
+  auto_connect: boolean;
 }
 
 export interface LogLine {

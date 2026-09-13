@@ -182,6 +182,14 @@ pub struct ConnectionProfile {
     /// Optional path to an Aether routing file with [block]/[direct] sections.
     #[serde(default)]
     pub routes_file: String,
+    /// Start the app automatically when the OS boots. Persisted here, but
+    /// the real effect is the OS autostart entry managed via set_autostart.
+    #[serde(default)]
+    pub autostart: bool,
+    /// Connect automatically shortly after the app launches. Purely a GUI
+    /// flag — never forwarded to the core.
+    #[serde(default)]
+    pub auto_connect: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -352,6 +360,8 @@ impl Default for ConnectionProfile {
             route_block: String::new(),
             route_direct: String::new(),
             routes_file: String::new(),
+            autostart: false,
+            auto_connect: false,
         }
     }
 }
@@ -460,6 +470,8 @@ mod tests {
         let p: ConnectionProfile = serde_json::from_str(json).unwrap();
         assert_eq!(p.bind_address, "127.0.0.1:1819");
         assert_eq!(p.masque_noize, MasqueNoize::Firewall);
+        assert!(!p.autostart);
+        assert!(!p.auto_connect);
     }
 
     #[test]

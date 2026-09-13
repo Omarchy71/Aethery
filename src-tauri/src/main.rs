@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod aether;
+mod autostart;
 mod commands;
 mod error;
 mod events;
@@ -14,10 +15,15 @@ use tauri::{Manager, WindowEvent};
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState::default())
         .setup(|app| {
             let data_dir = app.handle().path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            autostart::sync_on_boot(app.handle());
             // Reap any Aether process left running from a prior crash before
             // the user can click Connect and spawn a second one onto the
             // same port.
@@ -35,6 +41,8 @@ fn main() {
             commands::set_default_profile,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
+            autostart::get_autostart,
+            autostart::set_autostart,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

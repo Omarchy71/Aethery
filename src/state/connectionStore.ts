@@ -47,6 +47,8 @@ interface ConnectionState {
   setRouteBlock: (route_block: string) => void;
   setRouteDirect: (route_direct: string) => void;
   setRoutesFile: (routes_file: string) => void;
+  setAutostart: (autostart: boolean) => Promise<void>;
+  setAutoConnect: (auto_connect: boolean) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -74,6 +76,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     route_block: "",
     route_direct: "",
     routes_file: "",
+    autostart: false,
+    auto_connect: false,
   },
   logs: [],
   sidecarError: null,
@@ -180,6 +184,23 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setRoutesFile: (routes_file) =>
     set((s) => ({ profile: { ...s.profile, routes_file } })),
 
+  // Startup flags persist immediately (unlike the tunnel options, which are
+  // saved on successful connect) so toggling them without connecting still
+  // sticks. Autostart additionally flips the real OS entry via the backend;
+  // the state only updates after the backend confirms.
+  setAutostart: async (autostart) => {
+    await invoke("set_autostart", { enabled: autostart });
+    set((s) => ({ profile: { ...s.profile, autostart } }));
+  },
+
+  setAutoConnect: (auto_connect) => {
+    const profile = { ...get().profile, auto_connect };
+    set({ profile });
+    void invoke("set_default_profile", { profile }).catch((e) =>
+      console.error("Failed to persist auto-connect flag:", e),
+    );
+  },
+
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set
   // sidecarError if the binary is still missing.
@@ -237,11 +258,22 @@ export async function initConnectionListeners(): Promise<() => void> {
   // command touches the Aether binary, so a failure here is an IPC-layer
   // bug, not a sidecar problem — logged rather than shown as sidecarError.
   try {
-    const [status, profile] = await Promise.all([
+    const [status, profile, autostart] = await Promise.all([
       invoke<ConnectionStatus>("get_status"),
       invoke<ConnectionProfile>("get_default_profile"),
+      invoke<boolean>("get_autostart").catch(() => null),
     ]);
+    // The OS entry is the truth for autostart (the user may have removed it
+    // outside the app); fall back to the persisted flag if the query fails.
+    if (autostart !== null) profile.autostart = autostart;
     useConnectionStore.setState({ status, profile });
+    // Auto-connect on launch: fire shortly after first paint so the window
+    // is visible before the tunnel logs start streaming.
+    if (profile.auto_connect && status.state === "Idle") {
+      setTimeout(() => {
+        void useConnectionStore.getState().connect();
+      }, 800);
+    }
   } catch (e) {
     console.error("Failed to load initial connection state:", e);
   }
