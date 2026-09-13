@@ -1,4 +1,7 @@
-use tauri::AppHandle;
+// `Emitter` is required on Windows (E0599 without it) but flagged unused
+// on Linux — the allow keeps clippy clean on both.
+#[allow(unused_imports)]
+use tauri::{AppHandle, Emitter};
 
 /// Emits `app://focused` (bool) whenever the app gains or loses the
 /// foreground. Exists because neither signal the webview can see is
