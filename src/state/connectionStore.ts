@@ -187,10 +187,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   // Startup flags persist immediately (unlike the tunnel options, which are
   // saved on successful connect) so toggling them without connecting still
   // sticks. Autostart additionally flips the real OS entry via the backend;
-  // the state only updates after the backend confirms.
+  // the state only updates after the backend confirms, then the full
+  // in-memory profile is persisted so unsaved tunnel edits aren't clobbered
+  // by the backend's load-modify-save of the stored profile.
   setAutostart: async (autostart) => {
     await invoke("set_autostart", { enabled: autostart });
-    set((s) => ({ profile: { ...s.profile, autostart } }));
+    const profile = { ...get().profile, autostart };
+    set({ profile });
+    try {
+      await invoke("set_default_profile", { profile });
+    } catch (e) {
+      console.error("Failed to persist autostart flag:", e);
+    }
   },
 
   setAutoConnect: (auto_connect) => {
