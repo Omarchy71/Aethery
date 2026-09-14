@@ -48,3 +48,13 @@ pub fn get_close_to_tray() -> bool {
 pub fn set_close_to_tray(app: AppHandle, enabled: bool) {
     tray::set_close_to_tray(&app, enabled);
 }
+
+#[tauri::command]
+pub fn get_start_minimized() -> bool {
+    tray::get_start_minimized()
+}
+
+#[tauri::command]
+pub fn set_start_minimized(app: AppHandle, enabled: bool) {
+    tray::set_start_minimized(&app, enabled);
+}

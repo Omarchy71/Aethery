@@ -30,6 +30,14 @@ fn main() {
             aether::orphan::reap_orphan(&data_dir);
             focus::spawn_watcher(app.handle().clone());
             tray::init(app)?;
+            // "Start minimized" preference: open directly into the taskbar
+            // so a boot/autostart launch stays out of the user's way.
+            // The tray icon (always created above) remains the way back.
+            if tray::get_start_minimized() {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.minimize();
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -41,6 +49,8 @@ fn main() {
             commands::set_default_profile,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
+            commands::get_start_minimized,
+            commands::set_start_minimized,
             autostart::get_autostart,
             autostart::set_autostart,
         ])

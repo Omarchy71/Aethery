@@ -142,7 +142,7 @@ export function AdvancedPanel() {
 
             <FieldRow
               label="Startup"
-              tooltip="Start on boot registers the app with the OS (Windows startup, Linux autostart, macOS login item). Auto-connect dials the tunnel automatically shortly after the app opens."
+              tooltip="Start on boot registers the app with the OS (Windows startup, Linux autostart, macOS login item). Auto-connect dials the tunnel automatically shortly after the app opens. Start minimized opens the window into the taskbar."
             >
               <StartupSettings />
             </FieldRow>
