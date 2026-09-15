@@ -495,10 +495,9 @@ pub fn bring_up(
         emit_log(app, format!("[tun] cannot use data dir: {e}"));
         return false;
     }
-    if is_up(app) {
-        emit_log(app, format!("[tun] {TUN_NAME} already up"));
-        return true;
-    }
+    // NOTE: no early return when already up — bypass routes belong to the old
+    // session's gateway IPs (tun-up.ps1 always rebuilds them from the live
+    // sockets for exactly this reason).
     let hev = match resolve_hev(app) {
         Ok(p) => p,
         Err(e) => {
@@ -534,7 +533,7 @@ pub fn bring_up(
     };
     emit_log(
         app,
-        format!("[tun] bringing up {TUN_NAME} via 127.0.0.1:{port} ({prompt_hint})…"),
+        format!("[tun] bringing up {TUN_NAME} via {host}:{port} ({prompt_hint})…"),
     );
     let args = if cfg!(target_os = "windows") {
         vec![

@@ -16,8 +16,8 @@ $PidFile   = Join-Path $StateDir 'hev.pid'
 $StateFile = Join-Path $StateDir 'tun-net.json'
 $ExitFile  = Join-Path $StateDir 'tun-exit.code'
 
-if (Test-Path $LogFile)  { Remove-Item $LogFile -Force }
-if (Test-Path $ExitFile) { Remove-Item $ExitFile -Force }
+if (Test-Path $LogFile)  { Remove-Item $LogFile -Force -ErrorAction SilentlyContinue }
+if (Test-Path $ExitFile) { Remove-Item $ExitFile -Force -ErrorAction SilentlyContinue }
 
 function Log($m) {
     "[tun-down] $m" | Out-File -FilePath $LogFile -Append -Encoding ascii

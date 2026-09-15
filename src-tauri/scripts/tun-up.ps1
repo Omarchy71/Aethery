@@ -24,8 +24,8 @@ $PidFile   = Join-Path $StateDir 'hev.pid'
 $StateFile = Join-Path $StateDir 'tun-net.json'
 $ExitFile  = Join-Path $StateDir 'tun-exit.code'
 
-if (Test-Path $LogFile)  { Remove-Item $LogFile -Force }
-if (Test-Path $ExitFile) { Remove-Item $ExitFile -Force }
+if (Test-Path $LogFile)  { Remove-Item $LogFile -Force -ErrorAction SilentlyContinue }
+if (Test-Path $ExitFile) { Remove-Item $ExitFile -Force -ErrorAction SilentlyContinue }
 
 function Log($m) {
     "[tun-up] $m" | Out-File -FilePath $LogFile -Append -Encoding ascii
@@ -62,19 +62,13 @@ if (-not (Test-Path (Join-Path $HevDir 'wintun.dll'))) {
     Log "ERROR: wintun.dll missing next to hev.exe"; Finish 1
 }
 
-# Already up? (hev alive AND adapter present) — nothing to do.
+# A previous session's hev, if any (killed below). NOTE: no early exit when
+# the adapter is already up — bypass routes belong to the OLD session's
+# gateway IPs, and reusing them for this session's Aether remotes would loop
+# tunnel traffic back into the TUN. Always rebuild from the live sockets.
 $stalePid = $null
 if (Test-Path $PidFile) {
     $stalePid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    $hevAlive = $false
-    if ($stalePid -match '^\d+$') {
-        $hevAlive = $null -ne (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)
-    }
-    $adapterUp = $null -ne (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)
-    if ($hevAlive -and $adapterUp) {
-        Log "$TunName already up, nothing to do"
-        Finish 0
-    }
 }
 
 # Drop bypass routes a previous (possibly crashed) session left behind.
@@ -158,7 +152,7 @@ if ($AetherPid -ne 0) {
         if ($ip.AddressFamily -eq 'InterNetwork') {
             $prefix = "$r/32"
             New-NetRoute -DestinationPrefix $prefix -NextHop $OrigGw `
-                -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
+                -InterfaceIndex $OrigIf -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
         } else {
             $prefix = "$r/128"
             $gw6 = (Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue |
@@ -176,11 +170,26 @@ if ($AetherPid -ne 0) {
 }
 
 # Default via TUN with a winning metric; the original default stays as
-# fallback (higher metric) so teardown is just a delete.
+# fallback (higher metric) so teardown is just a delete. route.exe only
+# reports via $LASTEXITCODE — an unchecked failure here would leave the
+# backend believing VPN is up while traffic never enters the tunnel.
 $hasTunDefault = $null -ne (Get-NetRoute -DestinationPrefix '0.0.0.0/0' `
     -InterfaceIndex $TunIf -ErrorAction SilentlyContinue | Select-Object -First 1)
 if (-not $hasTunDefault) {
     route add 0.0.0.0 mask 0.0.0.0 0.0.0.0 metric 5 if $TunIf | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        # Stale entry from a crashed session — clear and retry once.
+        Get-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex $TunIf `
+            -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false `
+            -ErrorAction SilentlyContinue | Out-Null
+        route add 0.0.0.0 mask 0.0.0.0 0.0.0.0 metric 5 if $TunIf | Out-Null
+    }
+    $hasTunDefault = $null -ne (Get-NetRoute -DestinationPrefix '0.0.0.0/0' `
+        -InterfaceIndex $TunIf -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if (-not $hasTunDefault) {
+        Log "ERROR: failed to move default route onto $TunName"
+        Finish 1
+    }
     Log "default route via $TunName (metric 5)"
 }
 

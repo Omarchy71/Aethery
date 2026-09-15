@@ -50,7 +50,11 @@ export function VpnModeToggle() {
             setTunMtu(v === "" ? 0 : Number(v));
           }}
           onBlur={() => {
-            if (!tunMtu || tunMtu < 1280 || tunMtu > 9000) setTunMtu(1500);
+            // Clamp to the backend's range instead of resetting: a typed
+            // 9000 stays 9000, and half-typed input falls back to 1500.
+            if (!tunMtu) setTunMtu(1500);
+            else if (tunMtu < 1280) setTunMtu(1280);
+            else if (tunMtu > 9000) setTunMtu(9000);
           }}
           placeholder="1500"
           className="h-8 w-20 rounded-md bg-black/20 px-2 text-center font-mono text-xs text-foreground ring-1 ring-white/10 outline-none focus:ring-primary disabled:opacity-50"

@@ -19,14 +19,16 @@ export function ActiveConfigChips() {
   if (profile.protocol !== "auto") chips.push(PROTOCOL_LABEL[profile.protocol] ?? profile.protocol);
   if (profile.vpn_mode) chips.push("VPN");
   if (profile.direct_iran) chips.push("IR direct");
-  if (
-    profile.peer !== "" ||
-    profile.wg_peer !== "" ||
-    profile.wiw_outer !== "" ||
-    profile.wiw_inner !== "" ||
-    profile.mim_outer !== "" ||
-    profile.mim_inner !== ""
-  ) {
+  // Mirror profiles.rs gating: a stored pin only counts when it is actually
+  // sent for the selected protocol, so switching protocols can't show a
+  // stale "Pinned endpoint" for an inert field.
+  const p = profile.protocol;
+  const pinActive =
+    ((p === "auto" || p === "masque" || p === "wireguard") && profile.peer !== "") ||
+    ((p === "wireguard" || p === "gool") && profile.wg_peer !== "") ||
+    (p === "gool" && (profile.wiw_outer !== "" || profile.wiw_inner !== "")) ||
+    (p === "mim" && (profile.mim_outer !== "" || profile.mim_inner !== ""));
+  if (pinActive) {
     chips.push("Pinned endpoint");
   }
   if (profile.fragment) chips.push("Fragment");
