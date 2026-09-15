@@ -48,6 +48,7 @@ function IsLoopbackOrLocal($ip) {
 
 Log "starting (tun=$TunName)"
 
+try {
 # Must be elevated: adapter creation, routes and DNS all need it.
 $isAdmin = ([Security.Principal.WindowsPrincipal]`
     [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
@@ -196,3 +197,9 @@ Log "DNS -> $($servers -join ', ')"
 
 Log "UP ($TunName)"
 Finish 0
+} catch {
+    # Fail fast with the sentinel instead of hanging the backend's wait:
+    # without this any terminating error means a full-timeout connect.
+    Log "ERROR: $($_.Exception.Message)"
+    Finish 1
+}

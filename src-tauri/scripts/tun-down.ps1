@@ -30,6 +30,7 @@ function Finish($code) {
 
 Log "stopping (tun=$TunName)"
 
+try {
 $isAdmin = ([Security.Principal.WindowsPrincipal]`
     [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -64,12 +65,14 @@ if ($null -ne (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
 }
 
 if (Test-Path $PidFile) {
-    $pid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($pid -match '^\d+$') {
-        $hev = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    # NOTE: never name this $pid — $PID is a read-only automatic variable
+    # and assigning it throws under Stop preference.
+    $hevPid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($hevPid -match '^\d+$') {
+        $hev = Get-Process -Id $hevPid -ErrorAction SilentlyContinue
         if ($null -ne $hev) {
-            Log "stopping hev (pid $pid)"
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            Log "stopping hev (pid $hevPid)"
+            Stop-Process -Id $hevPid -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 1
         }
     }
@@ -84,3 +87,9 @@ if ($null -ne (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
 Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
 Log "DOWN"
 Finish 0
+} catch {
+    # Fail fast with the sentinel instead of hanging the backend's wait:
+    # without this any terminating error means a full-timeout disconnect.
+    Log "ERROR: $($_.Exception.Message)"
+    Finish 1
+}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Select,
   SelectContent,
@@ -28,7 +29,12 @@ export function MasqueEvasionSettings() {
   const masqueFamily =
     profile.protocol === "auto" || profile.protocol === "masque" || profile.protocol === "mim";
   const disabled = locked || !masqueFamily;
-  const echMode = profile.ech === "" ? "off" : profile.ech === "auto" ? "auto" : "custom";
+  // Picking "Custom" with an empty value would snap the Select back to Off
+  // ("" derives "off"), so the mode gets its own state independent of the
+  // stored value.
+  const [customMode, setCustomMode] = useState(false);
+  const isCustomValue = profile.ech !== "" && profile.ech !== "auto";
+  const echMode = customMode || isCustomValue ? "custom" : profile.ech === "auto" ? "auto" : "off";
 
   return (
     <div className="flex flex-col gap-2 rounded-md bg-black/10 p-2 ring-1 ring-white/10">
@@ -76,9 +82,15 @@ export function MasqueEvasionSettings() {
         <Select
           value={echMode}
           onValueChange={(v) => {
-            if (v === "off") setEch("");
-            else if (v === "auto") setEch("auto");
-            else setEch(profile.ech === "" || profile.ech === "auto" ? "" : profile.ech);
+            if (v === "off") {
+              setCustomMode(false);
+              setEch("");
+            } else if (v === "auto") {
+              setCustomMode(false);
+              setEch("auto");
+            } else {
+              setCustomMode(true);
+            }
           }}
           disabled={disabled}
         >
@@ -95,7 +107,7 @@ export function MasqueEvasionSettings() {
       {echMode === "custom" && (
         <input
           type="text"
-          value={profile.ech === "auto" ? "" : profile.ech}
+          value={isCustomValue ? profile.ech : ""}
           disabled={disabled}
           onChange={(e) => setEch(e.target.value.trim())}
           placeholder="Paste base64 ECH config"

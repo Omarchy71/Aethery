@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Info, Settings2 } from "lucide-react";
+import { Check, ChevronDown, Copy, Info, Settings2 } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -69,6 +69,7 @@ export function AdvancedPanel() {
   // Launch flag — locked mid-session like the other profile controls.
   const locked = status.state !== "Idle" && status.state !== "Error";
   const [autoScroll, setAutoScroll] = useState(true);
+  const [copied, setCopied] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -193,8 +194,26 @@ export function AdvancedPanel() {
             <div className="flex items-center gap-2">
               <div className="h-px flex-1 bg-border" />
               <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                Logs
+                Logs{logs.length > 0 ? ` · ${logs.length}` : ""}
               </span>
+              <button
+                type="button"
+                aria-label="Copy logs to clipboard"
+                title="Copy logs to clipboard"
+                disabled={logs.length === 0}
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(logs.map((l) => l.line).join("\n"))
+                    .then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    })
+                    .catch(() => {});
+                }}
+                className="grid size-5 place-items-center rounded text-muted-foreground outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
               <div className="h-px flex-1 bg-border" />
             </div>
 

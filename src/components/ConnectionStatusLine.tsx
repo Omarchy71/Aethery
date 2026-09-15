@@ -63,6 +63,15 @@ function ScanProgressBar({ percent }: { percent: number | null }) {
  * (verified during design: idle-grey as text measures 4.02:1, just under
  * AA's 4.5:1 minimum).
  */
+const PHASE_DOT: Record<string, string> = {
+  Idle: "var(--color-status-idle)",
+  Launching: "var(--color-status-connecting)",
+  Connecting: "var(--color-status-connecting)",
+  Reconnecting: "var(--color-status-connecting)",
+  Connected: "var(--color-status-connected)",
+  Disconnecting: "var(--color-status-connecting)",
+  Error: "var(--color-status-error)",
+};
 export function ConnectionStatusLine() {
   const status = useConnectionStore((s) => s.status);
   const scanBudgetSecs = useConnectionStore((s) => s.scanBudgetSecs);
@@ -141,17 +150,27 @@ export function ConnectionStatusLine() {
     <div
       aria-live="polite"
       aria-atomic="true"
-      className="flex flex-col items-center gap-2 text-center"
+      className="flex w-full max-w-sm flex-col items-center gap-1.5 rounded-2xl bg-surface-1/70 px-4 py-3 text-center ring-1 ring-white/10 backdrop-blur"
     >
-      <AnimatePresence mode="wait">
-        <motion.span
-          key={status.state}
-          className="block text-base font-medium text-foreground"
-          {...TEXT_TRANSITION}
-        >
-          {primary}
-        </motion.span>
-      </AnimatePresence>
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          className="size-2 rounded-full"
+          style={{
+            backgroundColor: PHASE_DOT[status.state],
+            boxShadow: `0 0 8px 1px ${PHASE_DOT[status.state]}`,
+          }}
+        />
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={status.state}
+            className="block text-base font-medium text-foreground"
+            {...TEXT_TRANSITION}
+          >
+            {primary}
+          </motion.span>
+        </AnimatePresence>
+      </div>
       <AnimatePresence mode="wait">
         <motion.span
           key={status.state}
