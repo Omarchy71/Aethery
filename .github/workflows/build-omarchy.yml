@@ -43,14 +43,28 @@ jobs:
 
       - run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build bundles (appimage, deb, rpm)
+        # NOTE: plain `tauri build` instead of tauri-action, so the
+        # libwayland-strip fix below runs BEFORE release upload.
+        run: npx tauri build --bundles appimage,deb,rpm
+
+      - name: Strip bundled libwayland from AppImage (black-window fix)
+        # linuxdeploy packs Ubuntu 22.04-era libwayland which breaks
+        # WebKit EGL on modern hosts (mesa 25/26): black window +
+        # "Could not create default EGL display". In-place, names stable.
+        run: bash scripts/fix-appimage-wayland.sh --in-place src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Attach bundles to draft release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseDraft: true
-          args: --bundles appimage,deb,rpm
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
 
       - uses: actions/upload-artifact@v4
         with:
@@ -129,6 +143,10 @@ jobs:
           # level ("failed to run linuxdeploy" with no detail); verbose
           # mode prints the plugin output so failures are diagnosable.
           npx tauri build -v --bundles appimage
+
+      - name: Strip bundled libwayland from AppImage (black-window fix)
+        # Same EGL/black-window fix as the portable job + build-omarchy.sh.
+        run: bash scripts/fix-appimage-wayland.sh --in-place src-tauri/target/release/bundle/appimage/*.AppImage
 
       - uses: actions/upload-artifact@v4
         with:

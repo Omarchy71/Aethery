@@ -115,5 +115,15 @@ export NO_STRIP=1
 npx tauri build --bundles appimage,deb
 
 echo ""
+echo "==> 5/4 Strip bundled libwayland from AppImage (black-window fix)"
+# linuxdeploy packs the build host's libwayland (Ubuntu 22.04 era) which
+# breaks WebKit EGL on modern hosts (black window + EGL_BAD_PARAMETER).
+# See scripts/fix-appimage-wayland.sh for the full story.
+for img in src-tauri/target/release/bundle/appimage/*.AppImage; do
+  [ -e "$img" ] || continue
+  bash scripts/fix-appimage-wayland.sh --in-place "$img"
+done
+
+echo ""
 echo "Done. Bundles:"
 ls -la src-tauri/target/release/bundle/appimage/ src-tauri/target/release/bundle/deb/ 2>/dev/null
