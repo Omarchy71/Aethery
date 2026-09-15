@@ -336,8 +336,19 @@ fn monitor_connect(
             // Only persisted as "last successful" once actually proven to
             // work, never on a mere attempt (see profiles::save's doc-comment).
             profiles::save(&app, &profile);
-            if profile.vpn_mode && cfg!(target_os = "linux") {
-                let up = crate::tun::bring_up(&app, &profile.bind_address, &profile.dns);
+            if profile.vpn_mode && crate::tun::SUPPORTED {
+                // The tunnel process's PID lets the Windows backend add direct
+                // bypass routes for Aether's own remote addresses (no --mark
+                // there); Linux ignores it and uses fwmark instead.
+                let aether_pid = manager
+                    .lock()
+                    .unwrap()
+                    .session
+                    .as_ref()
+                    .map(|s| s.pid())
+                    .unwrap_or(0);
+                let up =
+                    crate::tun::bring_up(&app, &profile.bind_address, &profile.dns, aether_pid);
                 if up {
                     new_state = ConnectionState::Connected {
                         socks_addr: profile.bind_address.clone(),
@@ -384,7 +395,7 @@ fn monitor_connected(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
-    let watch_tun = profile.vpn_mode && cfg!(target_os = "linux");
+    let watch_tun = profile.vpn_mode && crate::tun::SUPPORTED;
     let mut tun_lost_logged = false;
     loop {
         std::thread::sleep(Duration::from_millis(500));

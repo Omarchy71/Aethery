@@ -44,6 +44,14 @@ jobs:
           Expand-Archive aether.zip -DestinationPath aether-extract
           Move-Item aether-extract/aether.exe src-tauri/binaries/aether.exe
 
+      - name: "Fetch hev-socks5-tunnel (Windows TUN)"
+        shell: pwsh
+        run: |
+          ./src-tauri/binaries/fetch-hev.ps1
+
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - run: npm ci
 
       - name: Build bundles (nsis, msi)

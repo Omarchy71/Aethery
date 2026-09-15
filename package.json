@@ -9,7 +9,6 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
-    "build:omarchy": "bash scripts/build-omarchy.sh",
     "preview": "vite preview",
     "tauri": "tauri"
   },

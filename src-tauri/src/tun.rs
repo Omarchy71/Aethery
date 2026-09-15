@@ -1,4 +1,4 @@
-//! Linux TUN / VPN mode for Aethery.
+//! TUN / VPN mode for Aethery.
 //!
 //! Aether itself only exposes a local SOCKS5 (+ optional HTTP) proxy — there
 //! is no TUN device on its side. VPN mode closes that gap by layering a
@@ -11,16 +11,25 @@
 //! apps ──► default route ──► aether0 (TUN) ──► hev ──► 127.0.0.1:1819 ──► aether ──► internet
 //! ```
 //!
-//! Routing loops are avoided with a firewall mark: Aether is launched with
-//! `--mark <TUN_FWMARK>` (see [`crate::aether::profiles`]) and an
-//! `ip rule fwmark … table main` exception keeps marked packets on the real
-//! uplink instead of looping them back into the TUN. The privileged half
-//! (interface creation, routes, `/etc/resolv.conf`) runs through one-shot
-//! `pkexec` scripts so the GUI itself never runs as root — the user gets a
-//! single polkit prompt per connect/disconnect.
+//! Two platform backends share this interface:
 //!
-//! Linux-only by design: other platforms get a clear error from the command
-//! layer and the profile flag is ignored in `as_args()` off Linux.
+//! * **Linux**: the privileged half (interface creation, routes,
+//!   `/etc/resolv.conf`) runs through one-shot `pkexec` shell scripts, and
+//!   routing loops are avoided with a firewall mark — Aether is launched
+//!   with `--mark <TUN_FWMARK>` and an `ip rule fwmark … table main`
+//!   exception keeps marked packets on the real uplink.
+//! * **Windows**: the privileged half runs through one-shot PowerShell
+//!   scripts (`tun-up.ps1` / `tun-down.ps1`) launched elevated via UAC, with
+//!   hev's official `win64` build over the Wintun driver (`wintun.dll` must
+//!   sit next to `hev.exe`). `--mark` exists on Linux/Android only, so loop
+//!   avoidance instead adds explicit `/32` bypass routes for Aether's own
+//!   live remote addresses through the original gateway — derived from the
+//!   tunnel process's actual sockets at connect time, so it works for every
+//!   protocol (MASQUE / WireGuard / gool) without parsing logs.
+//!
+//! Either way the GUI itself never runs elevated, the user gets a single
+//! admin prompt per connect/disconnect, and a failed VPN step degrades to a
+//! plain proxy instead of failing the connection.
 
 use crate::events::{now_millis, LogEvent, LOG_EVENT};
 use serde::Serialize;
@@ -28,16 +37,24 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Kernel interface name. Deliberately NOT `tun0` — test machines (and other
-/// VPNs) commonly already own `tun0`, and colliding with it would hijack or
-/// break an unrelated tunnel.
+/// Whether this OS has a TUN backend. VPN mode is a no-op everywhere else:
+/// the profile flag still loads/saves, but nothing is brought up.
+pub const SUPPORTED: bool = cfg!(target_os = "linux") || cfg!(target_os = "windows");
+
+/// Kernel interface / adapter name. Deliberately NOT `tun0` — test machines
+/// (and other VPNs) commonly already own `tun0`, and colliding with it would
+/// hijack or break an unrelated tunnel.
 pub const TUN_NAME: &str = "aether0";
 /// Address assigned to the TUN interface (hev-socks5-tunnel convention:
 /// documentation/reserved TEST-NET-2 space, never routed publicly).
 pub const TUN_IPV4: &str = "198.18.0.1";
+/// ULA address for the adapter when the profile uses IPv6 (hev sample
+/// default; same reserved-space idea as the IPv4 address).
+pub const TUN_IPV6: &str = "fc00::1";
 pub const TUN_MTU: u32 = 1500;
 /// Firewall mark shared by Aether's `--mark` and hev's `mark:` — packets
-/// carrying it bypass the TUN via `ip rule … table main`.
+/// carrying it bypass the TUN via `ip rule … table main`. Linux only:
+/// Aether has no `--mark` on Windows, where bypass routes do this job.
 pub const TUN_FWMARK: u32 = 0x9e;
 pub const TUN_FWMARK_STR: &str = "0x9e";
 /// DNS used for the system resolver while the VPN is up when the profile has
@@ -47,6 +64,16 @@ pub const FALLBACK_DNS: &str = "1.1.1.1,1.0.0.1";
 const HEV_PID_FILE: &str = "hev.pid";
 const HEV_CONFIG_FILE: &str = "hev-tunnel.yml";
 const HEV_LOG_FILE: &str = "hev.log";
+/// Transcript the elevated PowerShell helpers write (the UAC boundary can't
+/// pipe stdout back, so the script logs to a file and Rust replays it).
+/// Also the handoff the elevated launcher uses to report its exit code.
+#[cfg(target_os = "windows")]
+const WIN_LOG_FILE: &str = "tun-last.log";
+#[cfg(target_os = "windows")]
+const WIN_EXIT_FILE: &str = "tun-exit.code";
+/// Exit code the elevated launcher reports when the UAC prompt is declined.
+#[cfg(target_os = "windows")]
+const UAC_CANCELLED_CODE: i32 = 1223;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct VpnStatus {
@@ -81,13 +108,32 @@ fn resolve_resource(app: &AppHandle, dir: &str, name: &str) -> Option<PathBuf> {
 }
 
 fn resolve_hev(app: &AppHandle) -> Result<PathBuf, String> {
-    let p = resolve_resource(app, "binaries", "hev").ok_or_else(|| {
-        "tun2socks binary not found (run src-tauri/binaries/fetch-hev.sh)".to_string()
+    let exe = if cfg!(target_os = "windows") {
+        "hev.exe"
+    } else {
+        "hev"
+    };
+    let p = resolve_resource(app, "binaries", exe).ok_or_else(|| {
+        if cfg!(target_os = "windows") {
+            "tun2socks binary not found (run src-tauri/binaries/fetch-hev.ps1)".to_string()
+        } else {
+            "tun2socks binary not found (run src-tauri/binaries/fetch-hev.sh)".to_string()
+        }
     })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+    }
+    // hev's Windows build drives the Wintun driver through a DLL that must
+    // sit next to the exe — fail fast with a clear message instead of a
+    // cryptic elevated-process startup error after the UAC prompt.
+    #[cfg(target_os = "windows")]
+    {
+        let sibling = p.with_file_name("wintun.dll");
+        if !sibling.exists() {
+            return Err("wintun.dll missing next to hev.exe (re-run fetch-hev.ps1)".into());
+        }
     }
     Ok(p)
 }
@@ -122,33 +168,47 @@ pub fn socks_target(bind_address: &str) -> (String, u16) {
     ("127.0.0.1".to_string(), 1819)
 }
 
-fn hev_config(host: &str, port: u16, data: &Path) -> String {
+/// hev YAML config. Same schema on both platforms; Windows omits `mark:`
+/// (no SO_MARK there — bypass routes handle loop avoidance) and always
+/// carries a ULA IPv6 address so dual-stack profiles work.
+fn hev_config_for(host: &str, port: u16, data: &Path, for_windows: bool) -> String {
+    let mark_line = if for_windows {
+        String::new()
+    } else {
+        format!("         \u{20}mark: {mark}\n", mark = TUN_FWMARK)
+    };
+    let ipv6_line = if for_windows {
+        format!("         \u{20}ipv6: '{addr}'\n", addr = TUN_IPV6)
+    } else {
+        String::new()
+    };
     format!(
         "# Generated by Aethery VPN mode — do not edit (regenerated per connect).\n\
          tunnel:\n\
-         \x20 name: {iface}\n\
-         \x20 mtu: {mtu}\n\
-         \x20 multi-queue: false\n\
-         \x20 ipv4: {addr}\n\
+         \u{20}name: {iface}\n\
+         \u{20}mtu: {mtu}\n\
+         \u{20}multi-queue: false\n\
+         \u{20}ipv4: {addr}\n\
+         {ipv6_line}\
          socks5:\n\
-         \x20 address: {host}\n\
-         \x20 port: {port}\n\
-         \x20 udp: 'udp'\n\
-         \x20 mark: {mark}\n\
+         \u{20}address: {host}\n\
+         \u{20}port: {port}\n\
+         \u{20}udp: 'udp'\n\
+         {mark_line}\
          misc:\n\
-         \x20 log-file: '{log}'\n\
-         \x20 log-level: warn\n\
-         \x20 task-stack-size: 86016\n",
+         \u{20}log-file: '{log}'\n\
+         \u{20}log-level: warn\n\
+         \u{20}task-stack-size: 86016\n",
         iface = TUN_NAME,
         mtu = TUN_MTU,
         addr = TUN_IPV4,
         host = host,
         port = port,
-        mark = TUN_FWMARK,
         log = data.join(HEV_LOG_FILE).display(),
     )
 }
 
+#[cfg(unix)]
 fn pid_alive(data: &Path) -> bool {
     let pid: i32 = std::fs::read_to_string(data.join(HEV_PID_FILE))
         .ok()
@@ -157,6 +217,32 @@ fn pid_alive(data: &Path) -> bool {
     pid > 0 && Path::new(&format!("/proc/{pid}")).exists()
 }
 
+/// Same exact-PID tasklist check as `aether::orphan` on Windows: a substring
+/// search would mistake e.g. pid 123 for 1234.
+#[cfg(target_os = "windows")]
+fn pid_alive(data: &Path) -> bool {
+    let pid: u32 = std::fs::read_to_string(data.join(HEV_PID_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if pid == 0 {
+        return false;
+    }
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    let want = pid.to_string();
+    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+        line.split(',')
+            .nth(1)
+            .is_some_and(|f| f.trim_matches('"') == want)
+    })
+}
+
+#[cfg(unix)]
 fn iface_exists() -> bool {
     std::process::Command::new("ip")
         .args(["link", "show", TUN_NAME])
@@ -165,6 +251,27 @@ fn iface_exists() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Unprivileged adapter check — plain `netsh` reads need no elevation, so
+/// this never prompts. Matches the full adapter name only, not a prefix.
+#[cfg(target_os = "windows")]
+fn iface_exists() -> bool {
+    let out = std::process::Command::new("netsh")
+        .args([
+            "interface",
+            "show",
+            "interface",
+            &format!("name={TUN_NAME}"),
+        ])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).lines().any(|l| {
+            let t = l.trim_end();
+            t == TUN_NAME || t.ends_with(&format!(" {TUN_NAME}"))
+        }),
+        _ => false,
+    }
 }
 
 /// Unprivileged liveness check — safe to call anywhere, never prompts.
@@ -194,6 +301,7 @@ pub fn status(app: &AppHandle) -> VpnStatus {
 
 /// Run `pkexec sh <script> <args…>` with a hard timeout, forwarding output
 /// lines into the app log. Returns the script's stdout on success.
+#[cfg(unix)]
 fn run_privileged(
     app: &AppHandle,
     script: &Path,
@@ -246,11 +354,135 @@ fn run_privileged(
     }
 }
 
+/// Quote one argument for embedding in a PowerShell single-quoted string.
+#[cfg(target_os = "windows")]
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Run a `.ps1` helper elevated via UAC with a hard timeout.
+///
+/// `Start-Process -Verb RunAs` can't pipe the elevated child's stdout back
+/// across the UAC boundary (and its `-Wait` is unreliable for elevated
+/// targets), so completion is signalled with a sentinel file: the script
+/// always writes `<data>\tun-exit.code` last, and logs every line to
+/// `<data>\tun-last.log`, which is replayed into the app log here.
+#[cfg(target_os = "windows")]
+fn run_elevated(
+    app: &AppHandle,
+    script: &Path,
+    args: &[String],
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let data = data_dir(app);
+    let log_file = data.join(WIN_LOG_FILE);
+    let exit_file = data.join(WIN_EXIT_FILE);
+    let _ = std::fs::remove_file(&log_file);
+    let _ = std::fs::remove_file(&exit_file);
+
+    let mut argv = vec![
+        "-NoProfile".to_string(),
+        "-ExecutionPolicy".to_string(),
+        "Bypass".to_string(),
+        "-File".to_string(),
+        script.display().to_string(),
+    ];
+    argv.extend(args.iter().cloned());
+    let argv_ps: Vec<String> = argv.iter().map(|a| ps_quote(a)).collect();
+    let inner = format!(
+        "try {{ $p = Start-Process -FilePath 'powershell.exe' -ArgumentList {args} -Verb RunAs -PassThru; exit 0 }} catch {{ exit {cancel} }}",
+        args = argv_ps.join(","),
+        cancel = UAC_CANCELLED_CODE,
+    );
+    let mut child = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &inner])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to start powershell ({e})"))?;
+
+    // The launcher exits once the UAC reply arrives; the elevated script
+    // signals its own completion via the sentinel file. Wait for both.
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let code: i32 = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if let Some(c) = status.code() {
+                    if c == UAC_CANCELLED_CODE {
+                        return Err(
+                            "Administrator approval was declined — proxy still works".into()
+                        );
+                    }
+                    if c != 0 {
+                        return Err(format!(
+                            "could not request elevation (launcher exit {c}) — proxy still works"
+                        ));
+                    }
+                }
+                break wait_for_sentinel(&exit_file, deadline)?;
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                return Err("elevated VPN step timed out".into());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+            Err(e) => return Err(format!("waiting on elevation prompt: {e}")),
+        }
+    };
+
+    let transcript = std::fs::read_to_string(&log_file).unwrap_or_default();
+    for line in transcript.lines() {
+        let line = line.trim();
+        if !line.is_empty() {
+            emit_log(app, format!("[tun] {line}"));
+        }
+    }
+    if code == 0 {
+        Ok(transcript)
+    } else if code == UAC_CANCELLED_CODE {
+        Err("Administrator approval was declined — proxy still works".into())
+    } else {
+        let first = transcript
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("see log");
+        Err(format!("elevated VPN step failed (exit {code}): {first}"))
+    }
+}
+
+/// Block until the elevated helper writes its exit-code sentinel.
+#[cfg(target_os = "windows")]
+fn wait_for_sentinel(exit_file: &Path, deadline: Instant) -> Result<i32, String> {
+    loop {
+        if let Ok(raw) = std::fs::read_to_string(exit_file) {
+            if let Ok(code) = raw.trim().parse::<i32>() {
+                return Ok(code);
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err("elevated VPN step timed out".into());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 /// Bring the TUN up after Aether's SOCKS port is live. Returns true when
 /// traffic is actually flowing through the TUN; false keeps the session as a
 /// plain proxy (never fails the connection — a VPN setup problem must not
 /// kill a working proxy).
-pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str) -> bool {
+///
+/// `aether_pid` is the live tunnel process; on Windows its current remote
+/// addresses become direct bypass routes so tunnel traffic can't loop back
+/// into the TUN (Linux uses `--mark` + fwmark instead and ignores this).
+pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str, aether_pid: u32) -> bool {
+    if !SUPPORTED {
+        emit_log(
+            app,
+            "[tun] VPN mode is not supported on this OS — proxy still works".into(),
+        );
+        return false;
+    }
     let data = data_dir(app);
     if let Err(e) = std::fs::create_dir_all(&data) {
         emit_log(app, format!("[tun] cannot use data dir: {e}"));
@@ -267,7 +499,12 @@ pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str) -> bool {
             return false;
         }
     };
-    let script = match resolve_script(app, "tun-up.sh") {
+    let (script_name, prompt_hint) = if cfg!(target_os = "windows") {
+        ("tun-up.ps1", "UAC prompt expected")
+    } else {
+        ("tun-up.sh", "polkit prompt expected")
+    };
+    let script = match resolve_script(app, script_name) {
         Ok(p) => p,
         Err(e) => {
             emit_log(app, format!("[tun] {e}"));
@@ -275,7 +512,7 @@ pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str) -> bool {
         }
     };
     let (host, port) = socks_target(bind_address);
-    let cfg = hev_config(&host, port, &data);
+    let cfg = hev_config_for(&host, port, &data, cfg!(target_os = "windows"));
     if let Err(e) = std::fs::write(data.join(HEV_CONFIG_FILE), &cfg) {
         emit_log(app, format!("[tun] cannot write hev config: {e}"));
         return false;
@@ -290,17 +527,34 @@ pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str) -> bool {
     };
     emit_log(
         app,
-        format!("[tun] bringing up {TUN_NAME} via 127.0.0.1:{port} (polkit prompt expected)…"),
+        format!("[tun] bringing up {TUN_NAME} via 127.0.0.1:{port} ({prompt_hint})…"),
     );
-    let args = vec![
-        data.display().to_string(),
-        hev.display().to_string(),
-        data.join(HEV_CONFIG_FILE).display().to_string(),
-        TUN_NAME.to_string(),
-        TUN_FWMARK_STR.to_string(),
-        dns_csv,
-    ];
-    match run_privileged(app, &script, &args, 120) {
+    let args = if cfg!(target_os = "windows") {
+        vec![
+            data.display().to_string(),
+            hev.display().to_string(),
+            data.join(HEV_CONFIG_FILE).display().to_string(),
+            TUN_NAME.to_string(),
+            dns_csv,
+            aether_pid.to_string(),
+        ]
+    } else {
+        vec![
+            data.display().to_string(),
+            hev.display().to_string(),
+            data.join(HEV_CONFIG_FILE).display().to_string(),
+            TUN_NAME.to_string(),
+            TUN_FWMARK_STR.to_string(),
+            dns_csv,
+        ]
+    };
+    #[cfg(target_os = "windows")]
+    let result = run_elevated(app, &script, &args, 120);
+    #[cfg(unix)]
+    let result = run_privileged(app, &script, &args, 120);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let result: Result<String, String> = Err("VPN mode is not supported on this OS".into());
+    match result {
         Ok(_) if is_up(app) => {
             emit_log(
                 app,
@@ -327,10 +581,18 @@ pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str) -> bool {
 
 /// Tear the TUN down. Best-effort and prompt-free when already down.
 pub fn bring_down(app: &AppHandle) {
+    if !SUPPORTED {
+        return;
+    }
     if !pid_alive(&data_dir(app)) && !iface_exists() {
         return;
     }
-    let script = match resolve_script(app, "tun-down.sh") {
+    let script_name = if cfg!(target_os = "windows") {
+        "tun-down.ps1"
+    } else {
+        "tun-down.sh"
+    };
+    let script = match resolve_script(app, script_name) {
         Ok(p) => p,
         Err(e) => {
             emit_log(app, format!("[tun] {e}"));
@@ -338,12 +600,22 @@ pub fn bring_down(app: &AppHandle) {
         }
     };
     let data = data_dir(app);
-    let args = vec![
-        data.display().to_string(),
-        TUN_NAME.to_string(),
-        TUN_FWMARK_STR.to_string(),
-    ];
-    match run_privileged(app, &script, &args, 30) {
+    let args = if cfg!(target_os = "windows") {
+        vec![data.display().to_string(), TUN_NAME.to_string()]
+    } else {
+        vec![
+            data.display().to_string(),
+            TUN_NAME.to_string(),
+            TUN_FWMARK_STR.to_string(),
+        ]
+    };
+    #[cfg(target_os = "windows")]
+    let result = run_elevated(app, &script, &args, 60);
+    #[cfg(unix)]
+    let result = run_privileged(app, &script, &args, 30);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let result: Result<String, String> = Err("VPN mode is not supported on this OS".into());
+    match result {
         Ok(_) => emit_log(app, format!("[tun] {TUN_NAME} down — routes/DNS restored")),
         Err(e) => emit_log(app, format!("[tun] teardown issue ({e})")),
     }
@@ -370,10 +642,19 @@ mod tests {
 
     #[test]
     fn config_points_at_socks_and_names_tun() {
-        let cfg = hev_config("127.0.0.1", 1819, Path::new("/tmp/x"));
+        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), false);
         assert!(cfg.contains("name: aether0"), "{cfg}");
         assert!(cfg.contains("address: 127.0.0.1"), "{cfg}");
         assert!(cfg.contains("port: 1819"), "{cfg}");
         assert!(cfg.contains("mark: 158"), "{cfg}");
+    }
+
+    #[test]
+    fn windows_config_has_no_mark_but_has_ipv6() {
+        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), true);
+        assert!(cfg.contains("name: aether0"), "{cfg}");
+        assert!(cfg.contains("address: 127.0.0.1"), "{cfg}");
+        assert!(!cfg.contains("mark:"), "{cfg}");
+        assert!(cfg.contains("ipv6:"), "{cfg}");
     }
 }

@@ -37,24 +37,17 @@ Grab the latest installer from the [Releases page](https://github.com/MatinSenPa
 - `Aether-GUI_x.y.z_x64-setup.exe` — standard installer (recommended)
 - `Aether-GUI_x.y.z_x64_en-US.msi` — MSI package, for scripted or enterprise installs
 
-Windows x64 only for now — see [Building from source](#building-from-source) for other platforms.
+Windows x64 only — releases (`v*-win` tags → `.github/workflows/build-windows.yml`) ship NSIS + MSI installers only. There is no Linux/macOS release track.
 
-### Omarchy / Arch Linux
+### VPN mode (Windows TUN)
 
-This fork ships a Linux-only track (`0.8.4+`, identifier `io.github.omarchy71.aethery`):
+Advanced → **VPN (Windows TUN)** turns the proxy into a full-system VPN: after Aether's SOCKS port is live, the app layers `hev-socks5-tunnel` (official `win64` build over the Wintun driver — bundled `hev.exe` + `wintun.dll`, fetched by `src-tauri/binaries/fetch-hev.ps1`) under an adapter named `aether0`, moves the default route (`metric 5`) and DNS onto it, and adds direct `/32` bypass routes for Aether's own live gateway addresses through the original gateway so tunnel traffic can't loop back into itself (`--mark` exists on Linux/Android only, so bypass routes do that job here). `route-direct`/`route-block` keep working behind the TUN via Aether's route sniffing.
 
-- `npm run build:omarchy` — native build on your machine, no sudo needed (AppImage + deb in `src-tauri/target/release/bundle/`). The AppImage runs install-free.
-- CI: `.github/workflows/build-omarchy.yml` — `portable` (Ubuntu glibc, runs anywhere) and `arch-native` (current Arch toolchain) AppImages; push an `omarchy-v*` tag to draft a release.
-- Notes: the tray icon is best-effort — on Hyprland setups without a StatusNotifier host the app still starts and runs from its window/taskbar entry. "Start on boot" writes `~/.config/autostart/io.github.omarchy71.aethery.desktop`.
-
-### VPN mode (Linux TUN)
-
-Advanced → **VPN (Linux TUN)** turns the proxy into a full-system VPN: after Aether's SOCKS port is live, the app layers `hev-socks5-tunnel` (bundled `hev` sidecar, fetched by `src-tauri/binaries/fetch-hev.sh`) under a kernel interface named `aether0`, moves the default route (`metric 5`) and DNS onto it, and marks Aether's own sockets (`--mark 0x9e` + `ip rule fwmark … table main`) so tunnel traffic can't loop back into itself. `route-direct`/`route-block` keep working behind the TUN via Aether's route sniffing.
-
-- One polkit (admin) approval per connect/disconnect — the GUI itself never runs as root. Privileged steps live in `src-tauri/scripts/tun-up.sh` / `tun-down.sh`, bundled as Tauri resources.
-- If VPN setup fails (no polkit, no `/dev/net/tun`, user cancels), the session stays up as a plain proxy — check the log for `[tun]` lines.
-- Status shows `Connected · VPN` + `TUN aether0` when active; losing the interface mid-session downgrades the badge and logs a hint to reconnect.
-- Requirements: `iproute2`, `polkit` (`pkexec`), kernel TUN. IPv4 only for now.
+- One Administrator (UAC) approval per connect/disconnect — the GUI itself never runs elevated. Privileged steps live in `src-tauri/scripts/tun-up.ps1` / `tun-down.ps1`, bundled as Tauri resources.
+- If VPN setup fails (UAC declined, Wintun unavailable, user cancels), the session stays up as a plain proxy — check the log for `[tun]` lines.
+- Status shows `Connected · VPN` + `TUN aether0` when active; losing the adapter mid-session downgrades the badge and logs a hint to reconnect.
+- Note: bypass routes are snapshotted from Aether's sockets at connect time. If Aether switches gateways mid-session (auto-reconnect), reconnect once to refresh them.
+- Requirements: Windows 10/11 x64. IPv4 fully covered; IPv6 remotes get `/128` bypasses when a v6 uplink exists.
 
 ## Building from source
 
@@ -69,15 +62,15 @@ Advanced → **VPN (Linux TUN)** turns the proxy into a full-system VPN: after A
    npm install
    ```
 
-3. **Fetch the Aether binary**
+3. **Fetch the Aether binary and the TUN sidecar (Windows)**
 
-   Aether-GUI bundles the real `aether` binary from [CluvexStudio/Aether releases](https://github.com/CluvexStudio/Aether/releases) rather than building it — this repo only ships the GUI. Fetch and checksum-verify it for your platform:
+   Aether-GUI bundles the real `aether` binary from [CluvexStudio/Aether releases](https://github.com/CluvexStudio/Aether/releases) rather than building it — this repo only ships the GUI. On Windows, download the matching `aether-windows-*.zip` from the [Aether releases page](https://github.com/CluvexStudio/Aether/releases) yourself, verify it against the published `SHA256SUMS.txt`, and extract `aether.exe` into `src-tauri/binaries/`. Then fetch the VPN sidecar:
 
-   ```sh
-   ./src-tauri/binaries/fetch-aether.sh
+   ```powershell
+   ./src-tauri/binaries/fetch-hev.ps1
    ```
 
-   This script covers Linux and macOS directly. On Windows, download the matching `aether-windows-*.zip` from the [Aether releases page](https://github.com/CluvexStudio/Aether/releases) yourself, verify it against the published `SHA256SUMS.txt`, and extract `aether.exe` into `src-tauri/binaries/`.
+   This drops `hev.exe` + `wintun.dll` (+ `msys-2.0.dll`) into `src-tauri/binaries/` — all three ship inside the installer and must stay side-by-side.
 
 4. **Run in development mode**
 
@@ -91,7 +84,7 @@ Advanced → **VPN (Linux TUN)** turns the proxy into a full-system VPN: after A
    npm run tauri build
    ```
 
-   Installers land under `src-tauri/target/release/bundle/` (NSIS `.exe` and `.msi` on Windows; `.dmg`/`.app` on macOS; `.deb`/`.AppImage`/`.rpm` on Linux — cross-platform bundles must each be built on their own OS, or via CI).
+   Installers land under `src-tauri/target/release/bundle/` (NSIS `.exe` and `.msi` — build on Windows, or push a `v*-win` tag and let CI attach them to a draft release).
 
 ## How it works
 

@@ -58,9 +58,9 @@ export interface ConnectionProfile {
   autostart: boolean;
   /** Connect automatically shortly after launch. Off by default. */
   auto_connect: boolean;
-  /** Linux TUN / VPN mode: route ALL system traffic through the tunnel
-   * via hev-socks5-tunnel + aether0 interface (needs polkit per connect).
-   * Off by default; ignored on non-Linux platforms. */
+  /** VPN mode (Windows TUN): route ALL system traffic through the tunnel
+   * via hev-socks5-tunnel + aether0 adapter (one UAC approval per connect).
+   * Off by default; applied on next connect. */
   vpn_mode: boolean;
 }
 

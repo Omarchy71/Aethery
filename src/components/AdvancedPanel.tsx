@@ -141,8 +141,8 @@ export function AdvancedPanel() {
               <RoutingSettings />
             </FieldRow>
             <FieldRow
-              label="VPN (Linux TUN)"
-              tooltip="Full-system VPN on top of the proxy: a TUN interface plus default route and DNS, so apps without proxy support are covered too. Aether's own sockets are marked to avoid routing loops."
+              label="VPN (Windows TUN)"
+              tooltip="Full-system VPN on top of the proxy: a TUN adapter plus default route and DNS, so apps without proxy support are covered too. Aether's gateway addresses get direct bypass routes so tunnel traffic can't loop back into itself."
             >
               <VpnModeToggle />
             </FieldRow>

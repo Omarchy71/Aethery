@@ -2,12 +2,12 @@ import { Switch } from "@/components/ui/switch";
 import { useConnectionStore } from "@/state/connectionStore";
 
 /**
- * Linux TUN / VPN mode toggle. When on, the backend layers hev-socks5-tunnel
- * + a default route + DNS on top of the proxy after connect, so every app
- * (not just proxy-configured ones) goes through the tunnel.
+ * VPN mode toggle (Windows TUN). When on, the backend layers hev-socks5-tunnel
+ * (Wintun) + a default route + DNS on top of the proxy after connect, so every
+ * app (not just proxy-configured ones) goes through the tunnel.
  *
  * Launch flag — locked mid-session like the other profile controls: it
- * changes how the next connect is built (adds `--mark`, brings up `aether0`).
+ * changes how the next connect is built (bypass routes, brings up `aether0`).
  */
 export function VpnModeToggle() {
   const vpnMode = useConnectionStore((s) => s.profile.vpn_mode);
@@ -27,8 +27,8 @@ export function VpnModeToggle() {
         />
       </div>
       <p className="text-[11px] leading-snug text-muted-foreground">
-        Linux only. Creates the <span className="font-mono">aether0</span> interface after connect
-        and moves the default route + DNS onto it. Needs one admin (polkit) approval per
+        Windows only. Creates the <span className="font-mono">aether0</span> adapter after connect
+        and moves the default route + DNS onto it. Needs one Administrator (UAC) approval per
         connect/disconnect. If VPN setup fails, the proxy still connects.
       </p>
     </div>

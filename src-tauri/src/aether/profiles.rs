@@ -190,11 +190,13 @@ pub struct ConnectionProfile {
     /// flag — never forwarded to the core.
     #[serde(default)]
     pub auto_connect: bool,
-    /// Linux TUN / VPN mode: after the SOCKS port is live, layer
-    /// hev-socks5-tunnel + a default route + DNS on top so ALL system
-    /// traffic uses the tunnel, not just proxy-configured apps. Tunnel
-    /// behavior, so it lives in the profile — but it never reaches the core
-    /// CLI except as `--mark` (Linux only) for loop avoidance.
+    /// VPN mode: after the SOCKS port is live, layer hev-socks5-tunnel + a
+    /// default route + DNS on top so ALL system traffic uses the tunnel, not
+    /// just proxy-configured apps. Tunnel behavior, so it lives in the
+    /// profile — but it never reaches the core CLI except as `--mark`
+    /// (Linux only) for loop avoidance. On Windows loop avoidance is done
+    /// with direct bypass routes (see tun.rs) since Aether has no `--mark`
+    /// there.
     #[serde(default)]
     pub vpn_mode: bool,
 }
@@ -310,11 +312,12 @@ impl ConnectionProfile {
             args.push("--routes".into());
             args.push(self.routes_file.trim().into());
         }
-        // VPN mode (Linux TUN): mark Aether's own sockets so the fwmark
-        // policy rule keeps them on the real uplink instead of looping them
-        // back into the TUN. `--mark` exists on Linux/Android only — never
-        // send it elsewhere, and never a bare `--vpn` flag (the core has no
-        // such option; the TUN layer is entirely this app's job).
+        // VPN mode: mark Aether's own sockets so the fwmark policy rule keeps
+        // them on the real uplink instead of looping them back into the TUN.
+        // `--mark` exists on Linux/Android only — never send it elsewhere
+        // (Windows avoids loops with direct bypass routes in tun-up.ps1),
+        // and never a bare `--vpn` flag (the core has no such option; the
+        // TUN layer is entirely this app's job).
         if self.vpn_mode && cfg!(target_os = "linux") {
             args.push("--mark".into());
             args.push(crate::tun::TUN_FWMARK_STR.into());
@@ -586,5 +589,18 @@ mod tests {
             args.get(i + 1).map(String::as_str),
             Some(crate::tun::TUN_FWMARK_STR)
         );
+    }
+
+    /// Windows has no `--mark` (Linux/Android only) — loop avoidance there
+    /// is direct bypass routes added by tun-up.ps1, never a core flag.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn vpn_mode_emits_no_mark_on_windows() {
+        let p = ConnectionProfile {
+            vpn_mode: true,
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--mark"), "args={args:?}");
     }
 }
