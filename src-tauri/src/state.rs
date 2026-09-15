@@ -29,6 +29,9 @@ pub enum ConnectionState {
         /// a LAN-shared setup displays what it actually serves on.
         http_addr: Option<String>,
         connected_at_ms: u64,
+        /// Linux TUN/VPN layer active on top of the proxy (default route +
+        /// DNS via `aether0`). False for plain proxy sessions.
+        vpn_active: bool,
     },
     Reconnecting {
         attempt: u32,

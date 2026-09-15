@@ -16,6 +16,7 @@ import { BindAddressField } from "@/components/BindAddressField";
 import { HttpProxyField } from "@/components/HttpProxyField";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
+import { VpnModeToggle } from "@/components/VpnModeToggle";
 import { StartupSettings } from "@/components/StartupSettings";
 import { useConnectionStore } from "@/state/connectionStore";
 
@@ -138,6 +139,12 @@ export function AdvancedPanel() {
               tooltip="Optional Aether 1.5 controls for DNS inside the tunnel and rules that block a destination or send it directly outside the tunnel."
             >
               <RoutingSettings />
+            </FieldRow>
+            <FieldRow
+              label="VPN (Linux TUN)"
+              tooltip="Full-system VPN on top of the proxy: a TUN interface plus default route and DNS, so apps without proxy support are covered too. Aether's own sockets are marked to avoid routing loops."
+            >
+              <VpnModeToggle />
             </FieldRow>
 
             <FieldRow

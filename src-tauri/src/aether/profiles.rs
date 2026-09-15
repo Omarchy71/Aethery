@@ -190,6 +190,13 @@ pub struct ConnectionProfile {
     /// flag — never forwarded to the core.
     #[serde(default)]
     pub auto_connect: bool,
+    /// Linux TUN / VPN mode: after the SOCKS port is live, layer
+    /// hev-socks5-tunnel + a default route + DNS on top so ALL system
+    /// traffic uses the tunnel, not just proxy-configured apps. Tunnel
+    /// behavior, so it lives in the profile — but it never reaches the core
+    /// CLI except as `--mark` (Linux only) for loop avoidance.
+    #[serde(default)]
+    pub vpn_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -303,6 +310,15 @@ impl ConnectionProfile {
             args.push("--routes".into());
             args.push(self.routes_file.trim().into());
         }
+        // VPN mode (Linux TUN): mark Aether's own sockets so the fwmark
+        // policy rule keeps them on the real uplink instead of looping them
+        // back into the TUN. `--mark` exists on Linux/Android only — never
+        // send it elsewhere, and never a bare `--vpn` flag (the core has no
+        // such option; the TUN layer is entirely this app's job).
+        if self.vpn_mode && cfg!(target_os = "linux") {
+            args.push("--mark".into());
+            args.push(crate::tun::TUN_FWMARK_STR.into());
+        }
         args
     }
 
@@ -362,6 +378,7 @@ impl Default for ConnectionProfile {
             routes_file: String::new(),
             autostart: false,
             auto_connect: false,
+            vpn_mode: false,
         }
     }
 }
@@ -472,6 +489,7 @@ mod tests {
         assert_eq!(p.masque_noize, MasqueNoize::Firewall);
         assert!(!p.autostart);
         assert!(!p.auto_connect);
+        assert!(!p.vpn_mode);
     }
 
     #[test]
@@ -531,5 +549,42 @@ mod tests {
             Some(("AETHER_ACCESS_EMAIL", "me@example.com"))
         );
         assert!(!p.as_args().iter().any(|arg| arg.contains("me@example.com")));
+    }
+
+    #[test]
+    fn default_profile_has_no_mark_flag() {
+        let args = ConnectionProfile::default().as_args();
+        assert!(!args.iter().any(|a| a == "--mark"), "args={args:?}");
+    }
+
+    #[test]
+    fn vpn_mode_never_leaks_a_bare_vpn_flag() {
+        let p = ConnectionProfile {
+            vpn_mode: true,
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(
+            !args.iter().any(|a| a == "--vpn" || a == "--tun"),
+            "args={args:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vpn_mode_emits_mark_for_loop_avoidance() {
+        let p = ConnectionProfile {
+            vpn_mode: true,
+            ..Default::default()
+        };
+        let args = p.as_args();
+        let i = args
+            .iter()
+            .position(|a| a == "--mark")
+            .expect("missing --mark");
+        assert_eq!(
+            args.get(i + 1).map(String::as_str),
+            Some(crate::tun::TUN_FWMARK_STR)
+        );
     }
 }

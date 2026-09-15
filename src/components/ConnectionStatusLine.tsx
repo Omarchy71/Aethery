@@ -120,9 +120,10 @@ export function ConnectionStatusLine() {
       secondary = `Attempt ${status.attempt} of ${status.max_attempts}`;
       break;
     case "Connected": {
-      primary = "Connected";
+      primary = status.vpn_active ? "Connected · VPN" : "Connected";
       const addrs = [`SOCKS ${status.socks_addr}`];
       if (status.http_addr != null) addrs.push(`HTTP ${status.http_addr}`);
+      if (status.vpn_active) addrs.push("TUN aether0");
       secondary = `${addrs.join(" · ")} · ${elapsed}`;
       break;
     }

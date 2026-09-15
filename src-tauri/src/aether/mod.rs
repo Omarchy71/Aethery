@@ -317,12 +317,15 @@ fn monitor_connect(
         }
 
         if status::port_is_live(&socks) {
-            let new_state = ConnectionState::Connected {
+            // Proxy is proven up. Emit immediately so the UI never waits on
+            // the privileged TUN step, then upgrade to VPN when requested.
+            let mut new_state = ConnectionState::Connected {
                 socks_addr: profile.bind_address.clone(),
                 http_addr: profile
                     .http_proxy_enabled
                     .then(|| profile.http_proxy_address.clone()),
                 connected_at_ms: now_millis(),
+                vpn_active: false,
             };
             mgr.state = new_state.clone();
             // Proven working — a future drop earns a fresh full retry budget
@@ -333,6 +336,21 @@ fn monitor_connect(
             // Only persisted as "last successful" once actually proven to
             // work, never on a mere attempt (see profiles::save's doc-comment).
             profiles::save(&app, &profile);
+            if profile.vpn_mode && cfg!(target_os = "linux") {
+                let up = crate::tun::bring_up(&app, &profile.bind_address, &profile.dns);
+                if up {
+                    new_state = ConnectionState::Connected {
+                        socks_addr: profile.bind_address.clone(),
+                        http_addr: profile
+                            .http_proxy_enabled
+                            .then(|| profile.http_proxy_address.clone()),
+                        connected_at_ms: now_millis(),
+                        vpn_active: true,
+                    };
+                    manager.lock().unwrap().state = new_state.clone();
+                    let _ = app.emit(STATUS_EVENT, &new_state);
+                }
+            }
             monitor_connected(app, manager, binary, data_dir, profile);
             return;
         }
@@ -357,8 +375,8 @@ fn monitor_connect(
     }
 }
 
-/// Watches an established connection purely for an unexpected process exit —
-/// there is no polling needed beyond that once `Connected` is reached.
+/// Watches an established connection for an unexpected process exit, plus
+/// the health of the optional TUN layer once `Connected` is reached.
 fn monitor_connected(
     app: AppHandle,
     manager: Arc<Mutex<AetherManager>>,
@@ -366,6 +384,8 @@ fn monitor_connected(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
+    let watch_tun = profile.vpn_mode && cfg!(target_os = "linux");
+    let mut tun_lost_logged = false;
     loop {
         std::thread::sleep(Duration::from_millis(500));
         let mut mgr = manager.lock().unwrap();
@@ -375,6 +395,7 @@ fn monitor_connected(
         if let Some(exit) = mgr.session.as_mut().and_then(|s| s.try_wait()) {
             mgr.session = None;
             drop(mgr);
+            crate::tun::bring_down(&app);
             handle_unexpected_failure(
                 app,
                 manager,
@@ -386,6 +407,39 @@ fn monitor_connected(
             );
             return;
         }
+        // The proxy can outlive its TUN (hev crash, interface yanked).
+        // Surface it once in the log; the proxy keeps serving meanwhile.
+        if watch_tun && !tun_lost_logged && !crate::tun::is_up(&app) {
+            tun_lost_logged = true;
+            drop(mgr);
+            use crate::events::{now_millis, LogEvent, LOG_EVENT};
+            use tauri::Emitter;
+            let _ = app.emit(
+                LOG_EVENT,
+                &LogEvent {
+                    line: "[tun] interface lost — proxy still up; reconnect to restore VPN".into(),
+                    timestamp: now_millis(),
+                },
+            );
+            // Downgrade the badge so the UI stops claiming VPN.
+            let mut guard = manager.lock().unwrap();
+            if let ConnectionState::Connected {
+                socks_addr,
+                http_addr,
+                connected_at_ms,
+                ..
+            } = guard.state.clone()
+            {
+                let downgraded = ConnectionState::Connected {
+                    socks_addr,
+                    http_addr,
+                    connected_at_ms,
+                    vpn_active: false,
+                };
+                guard.state = downgraded.clone();
+                let _ = app.emit(STATUS_EVENT, &downgraded);
+            }
+        }
     }
 }
 
@@ -393,6 +447,9 @@ pub fn request_disconnect(
     app: &AppHandle,
     manager: &Arc<Mutex<AetherManager>>,
 ) -> Result<(), AetherError> {
+    // VPN layer first (privileged teardown, one polkit prompt) so no packet
+    // keeps a TUN path once the proxy underneath is going away.
+    crate::tun::bring_down(app);
     let had_session = {
         let mut mgr = manager.lock().unwrap();
         // Reconnecting has no live session (the old one already exited; the

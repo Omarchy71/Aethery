@@ -8,6 +8,7 @@ mod events;
 mod focus;
 mod state;
 mod tray;
+mod tun;
 
 use state::AppState;
 use tauri::{Manager, WindowEvent};
@@ -53,6 +54,7 @@ fn main() {
             commands::get_status,
             commands::get_default_profile,
             commands::set_default_profile,
+            commands::get_vpn_status,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
             commands::get_start_minimized,

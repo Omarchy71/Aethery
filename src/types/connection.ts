@@ -5,7 +5,7 @@ export type ConnectionStatus =
   | { state: "Idle" }
   | { state: "Launching" }
   | { state: "Connecting" }
-  | { state: "Connected"; socks_addr: string; http_addr: string | null; connected_at_ms: number }
+  | { state: "Connected"; socks_addr: string; http_addr: string | null; connected_at_ms: number; vpn_active: boolean }
   | { state: "Reconnecting"; attempt: number; max_attempts: number }
   | { state: "Disconnecting" }
   | { state: "Error"; message: string; phase: string };
@@ -58,6 +58,10 @@ export interface ConnectionProfile {
   autostart: boolean;
   /** Connect automatically shortly after launch. Off by default. */
   auto_connect: boolean;
+  /** Linux TUN / VPN mode: route ALL system traffic through the tunnel
+   * via hev-socks5-tunnel + aether0 interface (needs polkit per connect).
+   * Off by default; ignored on non-Linux platforms. */
+  vpn_mode: boolean;
 }
 
 export interface LogLine {

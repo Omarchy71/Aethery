@@ -47,6 +47,15 @@ This fork ships a Linux-only track (`0.8.4+`, identifier `io.github.omarchy71.ae
 - CI: `.github/workflows/build-omarchy.yml` — `portable` (Ubuntu glibc, runs anywhere) and `arch-native` (current Arch toolchain) AppImages; push an `omarchy-v*` tag to draft a release.
 - Notes: the tray icon is best-effort — on Hyprland setups without a StatusNotifier host the app still starts and runs from its window/taskbar entry. "Start on boot" writes `~/.config/autostart/io.github.omarchy71.aethery.desktop`.
 
+### VPN mode (Linux TUN)
+
+Advanced → **VPN (Linux TUN)** turns the proxy into a full-system VPN: after Aether's SOCKS port is live, the app layers `hev-socks5-tunnel` (bundled `hev` sidecar, fetched by `src-tauri/binaries/fetch-hev.sh`) under a kernel interface named `aether0`, moves the default route (`metric 5`) and DNS onto it, and marks Aether's own sockets (`--mark 0x9e` + `ip rule fwmark … table main`) so tunnel traffic can't loop back into itself. `route-direct`/`route-block` keep working behind the TUN via Aether's route sniffing.
+
+- One polkit (admin) approval per connect/disconnect — the GUI itself never runs as root. Privileged steps live in `src-tauri/scripts/tun-up.sh` / `tun-down.sh`, bundled as Tauri resources.
+- If VPN setup fails (no polkit, no `/dev/net/tun`, user cancels), the session stays up as a plain proxy — check the log for `[tun]` lines.
+- Status shows `Connected · VPN` + `TUN aether0` when active; losing the interface mid-session downgrades the badge and logs a hint to reconnect.
+- Requirements: `iproute2`, `polkit` (`pkexec`), kernel TUN. IPv4 only for now.
+
 ## Building from source
 
 1. **Prerequisites**

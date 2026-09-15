@@ -33,6 +33,12 @@ pub fn get_default_profile(app: AppHandle) -> ConnectionProfile {
     aether::profiles::load(&app)
 }
 
+/// Unprivileged VPN/TUN status for the UI badge. Never prompts.
+#[tauri::command]
+pub fn get_vpn_status(app: AppHandle) -> crate::tun::VpnStatus {
+    crate::tun::status(&app)
+}
+
 #[tauri::command]
 pub fn set_default_profile(app: AppHandle, profile: ConnectionProfile) -> Result<(), AetherError> {
     aether::profiles::save(&app, &profile);

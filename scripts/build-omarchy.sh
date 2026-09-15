@@ -27,6 +27,9 @@ echo "    system deps OK"
 echo "==> 2/4 Fetching pinned Aether core (checksum-verified)"
 bash src-tauri/binaries/fetch-aether.sh
 
+echo "==> 2b/4 Fetching pinned hev-socks5-tunnel (Linux VPN tun2socks)"
+bash src-tauri/binaries/fetch-hev.sh
+
 echo "==> 2b/4 Ensuring real linuxdeploy AppImages (no FUSE needed)"
 # Tauri runs linuxdeploy with APPIMAGE_EXTRACT_AND_RUN=1, which self-extracts
 # without FUSE — but its bundler also zeroes 3 magic bytes (seek=8) of the

@@ -49,6 +49,7 @@ interface ConnectionState {
   setRoutesFile: (routes_file: string) => void;
   setAutostart: (autostart: boolean) => Promise<void>;
   setAutoConnect: (auto_connect: boolean) => void;
+  setVpnMode: (vpn_mode: boolean) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -78,6 +79,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     routes_file: "",
     autostart: false,
     auto_connect: false,
+    vpn_mode: false,
   },
   logs: [],
   sidecarError: null,
@@ -208,6 +210,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       console.error("Failed to persist auto-connect flag:", e),
     );
   },
+
+  // Tunnel behavior like the other proxy options: saved with the profile on
+  // the next successful connect (see backend profiles::save). Not persisted
+  // immediately — quitting without connecting drops the toggle, same as a
+  // protocol change.
+  setVpnMode: (vpn_mode) =>
+    set((s) => ({ profile: { ...s.profile, vpn_mode } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set
