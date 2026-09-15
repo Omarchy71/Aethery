@@ -49,7 +49,7 @@ export function RoutingSettings() {
       <div className="flex items-center justify-between px-1">
         <span
           className="text-[11px] text-muted-foreground"
-          title="Sends high-traffic Iranian destinations (shops, video, banks) straight out instead of through the tunnel — faster domestic traffic, less load on the tunnel. Merges with your Direct list above."
+          title="Sends all Iranian destinations (≈2900 prefixes + major domestic apps/sites) straight out instead of through the tunnel — faster domestic traffic, less load on the tunnel. Merges with your Direct list above. Ignored when a custom rules file is set."
         >
           Direct Iranian sites
         </span>

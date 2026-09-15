@@ -233,10 +233,11 @@ pub struct ConnectionProfile {
     pub route_block: String,
     #[serde(default)]
     pub route_direct: String,
-    /// Also send high-traffic Iranian destinations straight out
-    /// (`--route-direct` merged with the baked-in list below): domestic
-    /// sites and banking stay fast and reachable, and less traffic enters
-    /// the tunnel. Merged with `route_direct`, never replacing it.
+    /// Also send Iranian destinations straight out (a generated `--routes`
+    /// file with the embedded ~2850-prefix list below): domestic sites,
+    /// apps and banking stay fast and reachable, and less traffic enters
+    /// the tunnel. Merges with `route_direct`, never replacing it. Skipped
+    /// when `routes_file` is set — a custom file stays authoritative.
     #[serde(default)]
     pub direct_iran: bool,
     /// Optional path to an Aether routing file with [block]/[direct] sections.
@@ -299,7 +300,9 @@ fn default_tun_mtu() -> u32 {
     crate::tun::TUN_MTU
 }
 
-/// Baked-in `--route-direct` entries enabled by `direct_iran`: `private`
+/// Baked-in Iranian domains shipped inside the generated `--routes` file
+/// (see `iran.rs`): `private` plus high-traffic domestic hosts, covering
+/// app/CDN front-ends that resolve outside the prefix ranges.
 /// covers LAN/loopback/CGNAT, the rest are high-traffic Iranian destinations
 /// (shops, video, banks of records) that stay faster and more reachable
 /// outside the tunnel.
@@ -483,18 +486,42 @@ impl ConnectionProfile {
             args.push(self.route_block.trim().into());
         }
         {
-            // The Iran preset merges with — never replaces — the user's own
-            // direct list, so custom entries and the preset compose.
-            let mut direct = self.route_direct.trim().to_string();
-            if self.direct_iran {
-                if !direct.is_empty() {
-                    direct.push(',');
+            // The Iran preset (~2850 prefixes ≈ 50KB) can never ride the
+            // command line — Windows caps it at 32KB — so it travels in a
+            // generated `--routes` file. The user's own direct entries are
+            // folded into the same file, so nothing is lost and nothing is
+            // duplicated. A custom rules file (below) takes precedence; the
+            // caller logs that the preset is skipped in that case.
+            let custom_file = !self.routes_file.trim().is_empty();
+            if self.direct_iran && !custom_file {
+                match crate::iran::write_routes_file(&self.route_direct) {
+                    Ok(path) => {
+                        args.push("--routes".into());
+                        args.push(path.to_string_lossy().into_owned());
+                    }
+                    Err(e) => {
+                        // Fall back to the old small preset rather than
+                        // failing the whole connect over a temp file.
+                        let mut direct = self.route_direct.trim().to_string();
+                        if !direct.is_empty() {
+                            direct.push(',');
+                        }
+                        direct.push_str(IR_DIRECT_PRESET);
+                        if !direct.is_empty() {
+                            args.push("--route-direct".into());
+                            args.push(direct);
+                        }
+                        eprintln!("[aether] {e}");
+                    }
                 }
-                direct.push_str(IR_DIRECT_PRESET);
-            }
-            if !direct.is_empty() {
-                args.push("--route-direct".into());
-                args.push(direct);
+            } else {
+                // Preset off — or a custom rules file takes precedence (the
+                // caller logs that the preset is skipped in that case).
+                let direct = self.route_direct.trim().to_string();
+                if !direct.is_empty() {
+                    args.push("--route-direct".into());
+                    args.push(direct);
+                }
             }
         }
         if !self.routes_file.trim().is_empty() {
@@ -975,22 +1002,49 @@ mod tests {
     }
 
     #[test]
-    fn iran_preset_merges_with_user_direct_list() {
-        // Preset alone.
+    fn iran_preset_travels_in_a_routes_file() {
+        // Preset alone: no --route-direct flag (it would exceed Windows'
+        // 32KB command-line limit), a --routes file instead.
         let p = ConnectionProfile {
             direct_iran: true,
             ..Default::default()
         };
-        let v = flag_value(&p.as_args(), "--route-direct").expect("missing");
-        assert!(v.starts_with("private,"), "{v}");
-        assert!(v.contains("snapp.ir"), "{v}");
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--route-direct"), "args={args:?}");
+        let f = flag_value(&args, "--routes").expect("missing --routes");
+        let body = std::fs::read_to_string(f).expect("generated file");
+        assert!(body.starts_with("[direct]\n"), "{body:.200}");
+        assert!(body.contains("snapp.ir"), "preset domains kept");
+        assert!(body.contains("5.160.0.0/16"), "prefixes embedded");
         // User entries compose in front, never replaced.
         let p = ConnectionProfile {
             route_direct: "mybank.ir".into(),
             direct_iran: true,
             ..Default::default()
         };
-        let v = flag_value(&p.as_args(), "--route-direct").expect("missing");
-        assert!(v.starts_with("mybank.ir,private,"), "{v}");
+        let args = p.as_args();
+        let f = flag_value(&args, "--routes").expect("missing --routes");
+        let body = std::fs::read_to_string(f).expect("generated file");
+        let bank = body.find("mybank.ir").expect("user entry kept");
+        let preset = body.find("5.160.0.0/16").expect("preset present");
+        assert!(bank < preset, "user entries come first");
+    }
+
+    #[test]
+    fn iran_preset_yields_to_custom_routes_file() {
+        // A custom file stays authoritative; the preset is skipped so the
+        // command line stays small and the user's file wins.
+        let p = ConnectionProfile {
+            route_direct: "mybank.ir".into(),
+            routes_file: "C:/routes.txt".into(),
+            direct_iran: true,
+            ..Default::default()
+        };
+        let args = p.as_args();
+        // The only --routes is the user's own file, not a generated one.
+        let f = flag_value(&args, "--routes").expect("missing --routes");
+        assert_eq!(f, "C:/routes.txt");
+        let v = flag_value(&args, "--route-direct").expect("missing");
+        assert_eq!(v, "mybank.ir");
     }
 }

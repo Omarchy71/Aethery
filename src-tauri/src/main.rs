@@ -6,6 +6,7 @@ mod commands;
 mod error;
 mod events;
 mod focus;
+mod iran;
 mod state;
 mod tray;
 mod tun;

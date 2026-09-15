@@ -147,6 +147,14 @@ fn spawn_and_monitor(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) -> Result<(), AetherError> {
+    if profile.direct_iran && !profile.routes_file.trim().is_empty() {
+        // as_args gives the custom file precedence and skips the generated
+        // preset — say so in the log so the checkbox doesn't look broken.
+        crate::tun::emit_log(
+            &app,
+            "[route] custom rules file set — Iran preset skipped".into(),
+        );
+    }
     let (log_tx, log_rx) = mpsc::channel::<LogEvent>();
     let session_or_err = pty::spawn(&binary, &data_dir, profile.clone(), log_tx);
     let session = match session_or_err {
