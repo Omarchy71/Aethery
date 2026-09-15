@@ -38,6 +38,9 @@ jobs:
       - name: Fetch Aether core
         run: bash src-tauri/binaries/fetch-aether.sh
 
+      - name: Fetch hev-socks5-tunnel (Linux VPN tun2socks)
+        run: bash src-tauri/binaries/fetch-hev.sh
+
       - run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
@@ -73,6 +76,9 @@ jobs:
 
       - name: Fetch Aether core
         run: bash src-tauri/binaries/fetch-aether.sh
+
+      - name: Fetch hev-socks5-tunnel (Linux VPN tun2socks)
+        run: bash src-tauri/binaries/fetch-hev.sh
 
       - name: Pre-seed linuxdeploy gtk plugin (Arch fixes)
         # Same two Arch breakages hit locally (see scripts/build-omarchy.sh):
