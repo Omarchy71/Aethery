@@ -18,7 +18,9 @@ export function ActiveConfigChips() {
 
   if (profile.protocol !== "auto") chips.push(PROTOCOL_LABEL[profile.protocol] ?? profile.protocol);
   if (profile.vpn_mode) chips.push("VPN");
-  if (profile.direct_iran) chips.push("IR direct");
+  // Mirror profiles.rs precedence: a custom rules file skips the generated
+  // Iran preset, so the chip must not claim it while the file field is set.
+  if (profile.direct_iran && profile.routes_file.trim() === "") chips.push("IR direct");
   // Mirror profiles.rs gating: a stored pin only counts when it is actually
   // sent for the selected protocol, so switching protocols can't show a
   // stale "Pinned endpoint" for an inert field.

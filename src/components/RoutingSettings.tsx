@@ -69,6 +69,12 @@ export function RoutingSettings() {
         className={INPUT}
         aria-label="Routing rules file path"
       />
+      {directIran && profile.routes_file.trim() !== "" && (
+        <p className="px-1 text-[10px] leading-4 text-amber-500/90">
+          A custom rules file takes precedence — the Iranian preset above is
+          skipped while this field is set. Check the log at connect time.
+        </p>
+      )}
       <p className="text-[10px] leading-4 text-muted-foreground">
         Supports domain, IP/CIDR, <code>port:443</code>, <code>private</code>,
         and Aether&apos;s
