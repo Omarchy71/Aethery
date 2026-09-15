@@ -49,6 +49,17 @@ Advanced → **VPN (Windows TUN)** turns the proxy into a full-system VPN: after
 - Note: bypass routes are snapshotted from Aether's sockets at connect time. If Aether switches gateways mid-session (auto-reconnect), reconnect once to refresh them.
 - Requirements: Windows 10/11 x64. IPv4 fully covered; IPv6 remotes get `/128` bypasses when a v6 uplink exists.
 
+### Censorship-evasion options (for filtered networks like Iran)
+
+Beyond the protocol/noize choice, Advanced exposes the core's DPI-evasion flags:
+
+- **Pinned Endpoints** — lock known-good `ip:port` addresses (`--peer`, `--wg-peer`, `--wiw-outer/inner`, `--mim-outer/inner`) to skip the route scan. Naming both hops of gool/mim disables scanning entirely. The scan already tries ports 443/500/1701/4500/4443/8443/8095 — a pinned endpoint on a port that answers on your network beats re-scanning every time.
+- **Protocol `mim`** (MASQUE-in-MASQUE) — a second MASQUE tunnel inside the first, the MASQUE-world equivalent of gool. Reach for it when gool is fingerprinted but HTTPS-like traffic still passes.
+- **MASQUE Evasion** — `--fragment` splits the TLS ClientHello on the HTTP/2 carrier (needs the HTTP/2 transport) and `--ech auto` hides the SNI with Encrypted Client Hello.
+- **Direct Iranian sites** (DNS & Routing) — merges a baked-in list (`private` + major `.ir`/domestic destinations) into `--route-direct` so banking, shops and video go straight out: faster and less tunnel load. Your own Direct entries compose in front of it.
+- **WireGuard keepalive** (Obfuscation row, WG/gool) — raises `--keepalive` so mobile CGNAT doesn't drop idle UDP sessions.
+- **TUN MTU** (VPN row) — default 1500; PPPoE and most Iranian last-miles are stabler at 1280–1420.
+
 ## Building from source
 
 1. **Prerequisites**

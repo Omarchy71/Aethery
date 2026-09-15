@@ -12,6 +12,8 @@ import { useConnectionStore } from "@/state/connectionStore";
 export function VpnModeToggle() {
   const vpnMode = useConnectionStore((s) => s.profile.vpn_mode);
   const setVpnMode = useConnectionStore((s) => s.setVpnMode);
+  const tunMtu = useConnectionStore((s) => s.profile.tun_mtu);
+  const setTunMtu = useConnectionStore((s) => s.setTunMtu);
   const status = useConnectionStore((s) => s.status);
   const locked = status.state !== "Idle" && status.state !== "Error";
 
@@ -31,6 +33,30 @@ export function VpnModeToggle() {
         and moves the default route + DNS onto it. Needs one Administrator (UAC) approval per
         connect/disconnect. If VPN setup fails, the proxy still connects.
       </p>
+      <label className="flex items-center justify-between gap-2">
+        <span
+          className="text-[11px] text-muted-foreground"
+          title="TUN adapter MTU. 1500 is the default; PPPoE and most Iranian connections are stabler at 1280-1420."
+        >
+          TUN MTU
+        </span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={String(tunMtu)}
+          disabled={locked}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+            setTunMtu(v === "" ? 0 : Number(v));
+          }}
+          onBlur={() => {
+            if (!tunMtu || tunMtu < 1280 || tunMtu > 9000) setTunMtu(1500);
+          }}
+          placeholder="1500"
+          className="h-8 w-20 rounded-md bg-black/20 px-2 text-center font-mono text-xs text-foreground ring-1 ring-white/10 outline-none focus:ring-primary disabled:opacity-50"
+          aria-label="TUN adapter MTU"
+        />
+      </label>
     </div>
   );
 }

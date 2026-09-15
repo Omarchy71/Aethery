@@ -42,9 +42,11 @@ export function NoizeProfileToggle() {
   const wgNoize = useConnectionStore((s) => s.profile.wg_noize);
   const setMasqueNoize = useConnectionStore((s) => s.setMasqueNoize);
   const setWgNoize = useConnectionStore((s) => s.setWgNoize);
+  const wgKeepalive = useConnectionStore((s) => s.profile.wg_keepalive);
+  const setWgKeepalive = useConnectionStore((s) => s.setWgKeepalive);
 
   const locked = status.state !== "Idle" && status.state !== "Error";
-  const isMasque = protocol === "auto" || protocol === "masque";
+  const isMasque = protocol === "auto" || protocol === "masque" || protocol === "mim";
 
   if (isMasque) {
     return (
@@ -79,6 +81,7 @@ export function NoizeProfileToggle() {
   }
 
   return (
+    <div className="flex flex-col gap-2">
     <ToggleGroup
       type="single"
       value={wgNoize}
@@ -106,5 +109,21 @@ export function NoizeProfileToggle() {
         </Tooltip>
       ))}
     </ToggleGroup>
+      <label className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground" title="Keeps NAT bindings from expiring on idle UDP (mobile networks). Empty keeps the core default of 5s.">
+          Keepalive (sec)
+        </span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={wgKeepalive}
+          disabled={locked}
+          onChange={(e) => setWgKeepalive(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="5"
+          className="h-8 w-20 rounded-md bg-black/20 px-2 text-center font-mono text-xs text-foreground ring-1 ring-white/10 outline-none focus:ring-primary disabled:opacity-50"
+          aria-label="WireGuard keepalive seconds"
+        />
+      </label>
+    </div>
   );
 }

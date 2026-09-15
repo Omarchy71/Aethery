@@ -17,6 +17,8 @@ import { HttpProxyField } from "@/components/HttpProxyField";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { VpnModeToggle } from "@/components/VpnModeToggle";
+import { EndpointPinning } from "@/components/EndpointPinning";
+import { MasqueEvasionSettings } from "@/components/MasqueEvasionSettings";
 import { StartupSettings } from "@/components/StartupSettings";
 import { useConnectionStore } from "@/state/connectionStore";
 
@@ -91,9 +93,15 @@ export function AdvancedPanel() {
           <div className="flex flex-col gap-4 pb-2">
             <FieldRow
               label="Protocol"
-              tooltip="MASQUE disguises traffic as normal HTTPS — best against strict censorship. WireGuard is lighter and faster. gool nests two WireGuard tunnels for extra security at a speed cost."
+              tooltip="MASQUE disguises traffic as normal HTTPS — best against strict censorship. WireGuard is lighter and faster. gool nests two WireGuard tunnels, mim nests two MASQUE tunnels, each for extra resistance at a speed cost."
             >
               <ProtocolSelect />
+            </FieldRow>
+            <FieldRow
+              label="Pinned Endpoints"
+              tooltip="Skip the route scan for known-good addresses (ip:port). Name both hops of gool/mim to disable scanning entirely. Only the inputs matching the selected protocol are sent."
+            >
+              <EndpointPinning />
             </FieldRow>
             <FieldRow label="Scan Mode">
               <ScanModeToggle />
@@ -115,6 +123,12 @@ export function AdvancedPanel() {
               tooltip="Disguises the handshake so DPI can't fingerprint the protocol. Heavier profiles send more decoy traffic — try escalating if the default doesn't connect. Options change based on the selected protocol."
             >
               <NoizeProfileToggle />
+            </FieldRow>
+            <FieldRow
+              label="MASQUE Evasion"
+              tooltip="TLS ClientHello fragmentation and Encrypted Client Hello hide the SNI from DPI on MASQUE connections. Only applies to MASQUE-family protocols."
+            >
+              <MasqueEvasionSettings />
             </FieldRow>
             <FieldRow
               label="SOCKS5 Proxy"

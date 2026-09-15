@@ -33,6 +33,17 @@ interface ConnectionState {
   setMasqueHttp2: (masque_http2: boolean) => void;
   setMasqueNoize: (masque_noize: MasqueNoize) => void;
   setWgNoize: (wg_noize: WgNoize) => void;
+  setWgKeepalive: (wg_keepalive: string) => void;
+  setPeer: (peer: string) => void;
+  setWgPeer: (wg_peer: string) => void;
+  setWiwOuter: (wiw_outer: string) => void;
+  setWiwInner: (wiw_inner: string) => void;
+  setMimOuter: (mim_outer: string) => void;
+  setMimInner: (mim_inner: string) => void;
+  setFragment: (fragment: boolean) => void;
+  setFragmentSize: (fragment_size: string) => void;
+  setFragmentDelay: (fragment_delay: string) => void;
+  setEch: (ech: string) => void;
   setBindAddress: (bind_address: string) => void;
   setHttpProxyEnabled: (http_proxy_enabled: boolean) => void;
   setHttpProxyAddress: (http_proxy_address: string) => void;
@@ -46,10 +57,12 @@ interface ConnectionState {
   setZeroTrustGateway: (zero_trust_gateway: boolean) => void;
   setRouteBlock: (route_block: string) => void;
   setRouteDirect: (route_direct: string) => void;
+  setDirectIran: (direct_iran: boolean) => void;
   setRoutesFile: (routes_file: string) => void;
   setAutostart: (autostart: boolean) => Promise<void>;
   setAutoConnect: (auto_connect: boolean) => void;
   setVpnMode: (vpn_mode: boolean) => void;
+  setTunMtu: (tun_mtu: number) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -63,6 +76,17 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     masque_http2: false,
     masque_noize: "firewall",
     wg_noize: "balanced",
+    wg_keepalive: "",
+    peer: "",
+    wg_peer: "",
+    wiw_outer: "",
+    wiw_inner: "",
+    mim_outer: "",
+    mim_inner: "",
+    fragment: false,
+    fragment_size: "",
+    fragment_delay: "",
+    ech: "",
     bind_address: "127.0.0.1:1819",
     http_proxy_enabled: false,
     http_proxy_address: "127.0.0.1:1820",
@@ -76,10 +100,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     zero_trust_gateway: false,
     route_block: "",
     route_direct: "",
+    direct_iran: false,
     routes_file: "",
     autostart: false,
     auto_connect: false,
     vpn_mode: false,
+    tun_mtu: 1500,
   },
   logs: [],
   sidecarError: null,
@@ -136,6 +162,37 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setWgNoize: (wg_noize) =>
     set((s) => ({ profile: { ...s.profile, wg_noize } })),
 
+  setWgKeepalive: (wg_keepalive) =>
+    set((s) => ({ profile: { ...s.profile, wg_keepalive } })),
+
+  setPeer: (peer) => set((s) => ({ profile: { ...s.profile, peer } })),
+
+  setWgPeer: (wg_peer) =>
+    set((s) => ({ profile: { ...s.profile, wg_peer } })),
+
+  setWiwOuter: (wiw_outer) =>
+    set((s) => ({ profile: { ...s.profile, wiw_outer } })),
+
+  setWiwInner: (wiw_inner) =>
+    set((s) => ({ profile: { ...s.profile, wiw_inner } })),
+
+  setMimOuter: (mim_outer) =>
+    set((s) => ({ profile: { ...s.profile, mim_outer } })),
+
+  setMimInner: (mim_inner) =>
+    set((s) => ({ profile: { ...s.profile, mim_inner } })),
+
+  setFragment: (fragment) =>
+    set((s) => ({ profile: { ...s.profile, fragment } })),
+
+  setFragmentSize: (fragment_size) =>
+    set((s) => ({ profile: { ...s.profile, fragment_size } })),
+
+  setFragmentDelay: (fragment_delay) =>
+    set((s) => ({ profile: { ...s.profile, fragment_delay } })),
+
+  setEch: (ech) => set((s) => ({ profile: { ...s.profile, ech } })),
+
   setBindAddress: (bind_address) =>
     set((s) => ({ profile: { ...s.profile, bind_address } })),
 
@@ -183,6 +240,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setRouteDirect: (route_direct) =>
     set((s) => ({ profile: { ...s.profile, route_direct } })),
 
+  setDirectIran: (direct_iran) =>
+    set((s) => ({ profile: { ...s.profile, direct_iran } })),
+
   setRoutesFile: (routes_file) =>
     set((s) => ({ profile: { ...s.profile, routes_file } })),
 
@@ -217,6 +277,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   // protocol change.
   setVpnMode: (vpn_mode) =>
     set((s) => ({ profile: { ...s.profile, vpn_mode } })),
+
+  setTunMtu: (tun_mtu) =>
+    set((s) => ({ profile: { ...s.profile, tun_mtu } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set

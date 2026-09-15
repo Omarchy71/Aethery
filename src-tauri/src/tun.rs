@@ -170,8 +170,9 @@ pub fn socks_target(bind_address: &str) -> (String, u16) {
 
 /// hev YAML config. Same schema on both platforms; Windows omits `mark:`
 /// (no SO_MARK there — bypass routes handle loop avoidance) and always
-/// carries a ULA IPv6 address so dual-stack profiles work.
-fn hev_config_for(host: &str, port: u16, data: &Path, for_windows: bool) -> String {
+/// carries a ULA IPv6 address so dual-stack profiles work. `mtu` is clamped
+/// to 1280–9000: PPPoE and most Iranian last-miles fragment at 1500.
+fn hev_config_for(host: &str, port: u16, data: &Path, for_windows: bool, mtu: u32) -> String {
     let mark_line = if for_windows {
         String::new()
     } else {
@@ -200,7 +201,7 @@ fn hev_config_for(host: &str, port: u16, data: &Path, for_windows: bool) -> Stri
          \u{20}log-level: warn\n\
          \u{20}task-stack-size: 86016\n",
         iface = TUN_NAME,
-        mtu = TUN_MTU,
+        mtu = mtu.clamp(1280, 9000),
         addr = TUN_IPV4,
         host = host,
         port = port,
@@ -475,7 +476,13 @@ fn wait_for_sentinel(exit_file: &Path, deadline: Instant) -> Result<i32, String>
 /// `aether_pid` is the live tunnel process; on Windows its current remote
 /// addresses become direct bypass routes so tunnel traffic can't loop back
 /// into the TUN (Linux uses `--mark` + fwmark instead and ignores this).
-pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str, aether_pid: u32) -> bool {
+pub fn bring_up(
+    app: &AppHandle,
+    bind_address: &str,
+    dns: &str,
+    aether_pid: u32,
+    tun_mtu: u32,
+) -> bool {
     if !SUPPORTED {
         emit_log(
             app,
@@ -512,7 +519,7 @@ pub fn bring_up(app: &AppHandle, bind_address: &str, dns: &str, aether_pid: u32)
         }
     };
     let (host, port) = socks_target(bind_address);
-    let cfg = hev_config_for(&host, port, &data, cfg!(target_os = "windows"));
+    let cfg = hev_config_for(&host, port, &data, cfg!(target_os = "windows"), tun_mtu);
     if let Err(e) = std::fs::write(data.join(HEV_CONFIG_FILE), &cfg) {
         emit_log(app, format!("[tun] cannot write hev config: {e}"));
         return false;
@@ -642,7 +649,7 @@ mod tests {
 
     #[test]
     fn config_points_at_socks_and_names_tun() {
-        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), false);
+        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), false, 1500);
         assert!(cfg.contains("name: aether0"), "{cfg}");
         assert!(cfg.contains("address: 127.0.0.1"), "{cfg}");
         assert!(cfg.contains("port: 1819"), "{cfg}");
@@ -651,10 +658,20 @@ mod tests {
 
     #[test]
     fn windows_config_has_no_mark_but_has_ipv6() {
-        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), true);
+        let cfg = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), true, 1500);
         assert!(cfg.contains("name: aether0"), "{cfg}");
         assert!(cfg.contains("address: 127.0.0.1"), "{cfg}");
         assert!(!cfg.contains("mark:"), "{cfg}");
         assert!(cfg.contains("ipv6:"), "{cfg}");
+    }
+
+    #[test]
+    fn mtu_is_clamped_to_sane_range() {
+        let low = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), true, 0);
+        assert!(low.contains("mtu: 1280"), "{low}");
+        let high = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), true, 99999);
+        assert!(high.contains("mtu: 9000"), "{high}");
+        let custom = hev_config_for("127.0.0.1", 1819, Path::new("/tmp/x"), false, 1400);
+        assert!(custom.contains("mtu: 1400"), "{custom}");
     }
 }

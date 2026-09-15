@@ -10,7 +10,7 @@ export type ConnectionStatus =
   | { state: "Disconnecting" }
   | { state: "Error"; message: string; phase: string };
 
-export type Protocol = "auto" | "masque" | "wireguard" | "gool";
+export type Protocol = "auto" | "masque" | "wireguard" | "gool" | "mim";
 export type ScanMode = "turbo" | "balanced" | "thorough" | "stealth" | "ironclad";
 export type IpVersion = "v4" | "v6" | "both";
 export type MasqueNoize = "firewall" | "gfw" | "off";
@@ -31,6 +31,23 @@ export interface ConnectionProfile {
   masque_noize: MasqueNoize;
   /** Obfuscation profile for WireGuard/gool (balanced/aggressive/light/off). */
   wg_noize: WgNoize;
+  /** WireGuard keepalive seconds (--keepalive). Empty keeps core default. */
+  wg_keepalive: string;
+  /** Pinned endpoints (ip:port) — skip the scan. peer: MASQUE/WG;
+   * wg_peer: WG/gool outer hop; wiw_*: gool hops; mim_*: mim hops. */
+  peer: string;
+  wg_peer: string;
+  wiw_outer: string;
+  wiw_inner: string;
+  mim_outer: string;
+  mim_inner: string;
+  /** Split the TLS ClientHello on the MASQUE HTTP/2 carrier (--fragment). */
+  fragment: boolean;
+  /** Optional --fragment-size / --fragment-delay (n or a-b). */
+  fragment_size: string;
+  fragment_delay: string;
+  /** Encrypted Client Hello: "auto" or a custom base64 config. Empty = off. */
+  ech: string;
   /** Local SOCKS5 listen address (--bind). Default 127.0.0.1:1819. */
   bind_address: string;
   /** Expose the core's HTTP CONNECT proxy (--http-proxy). HTTPS is served
@@ -53,6 +70,9 @@ export interface ConnectionProfile {
   /** Aether ≥1.5.0 traffic-routing rules. */
   route_block: string;
   route_direct: string;
+  /** Also send high-traffic Iranian destinations straight out (preset merged
+   * with route_direct). Off by default. */
+  direct_iran: boolean;
   routes_file: string;
   /** Start the app on OS boot (OS autostart entry). Off by default. */
   autostart: boolean;
@@ -62,6 +82,8 @@ export interface ConnectionProfile {
    * via hev-socks5-tunnel + aether0 adapter (one UAC approval per connect).
    * Off by default; applied on next connect. */
   vpn_mode: boolean;
+  /** MTU of the TUN adapter. Default 1500; 1280-1420 is stabler on PPPoE. */
+  tun_mtu: number;
 }
 
 export interface LogLine {

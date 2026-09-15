@@ -11,16 +11,26 @@ pub enum Protocol {
     Masque,
     Wireguard,
     Gool,
+    Mim,
 }
 
 impl Protocol {
     /// The literal menu choice Aether expects at its "Protocol:" prompt.
+    /// Flags passed up front normally suppress the prompt entirely, so the
+    /// Mim choice is fallback-only (4th entry, matching the core's menu).
     pub fn as_menu_choice(&self) -> &'static str {
         match self {
             Protocol::Auto | Protocol::Masque => "1",
             Protocol::Wireguard => "2",
             Protocol::Gool => "3",
+            Protocol::Mim => "4",
         }
+    }
+
+    /// MASQUE-family protocols share the MASQUE noize table, transport and
+    /// evasion flags; WireGuard and gool share the WG ones.
+    pub fn is_masque_family(&self) -> bool {
+        matches!(self, Protocol::Auto | Protocol::Masque | Protocol::Mim)
     }
 }
 
@@ -122,6 +132,23 @@ pub struct ConnectionProfile {
     /// new interactive "MASQUE transport" prompt in both directions.
     #[serde(default)]
     pub masque_http2: bool,
+    /// Split the TLS ClientHello on the MASQUE HTTP/2 carrier (`--fragment`)
+    /// to defeat inspectors that read the SNI from a single packet. TCP-only:
+    /// only sent for MASQUE-family protocols.
+    #[serde(default)]
+    pub fragment: bool,
+    /// Optional `--fragment-size` / `--fragment-delay` overrides (`16-32` /
+    /// `2-10` are the core defaults). Only sent when `fragment` is on and
+    /// the value parses as `n` or `a-b`.
+    #[serde(default)]
+    pub fragment_size: String,
+    #[serde(default)]
+    pub fragment_delay: String,
+    /// Encrypted Client Hello (`--ech`): `auto` fetches an ECH config and
+    /// hides the SNI, or paste a custom base64 config. Empty disables it.
+    /// Only sent for MASQUE-family protocols.
+    #[serde(default)]
+    pub ech: String,
     /// Obfuscation profile for MASQUE (firewall/gfw/off). Passed as
     /// `--noize <value>`. Only sent when the active protocol is MASQUE-based.
     #[serde(default = "default_masque_noize")]
@@ -130,6 +157,33 @@ pub struct ConnectionProfile {
     /// Only sent when the active protocol is WireGuard or gool.
     #[serde(default = "default_wg_noize")]
     pub wg_noize: WgNoize,
+    /// WireGuard persistent-keepalive interval in seconds (`--keepalive`,
+    /// core default 5). Empty keeps the core default. Only sent for
+    /// WireGuard/gool — NAT on mobile networks otherwise drops idle UDP.
+    #[serde(default)]
+    pub wg_keepalive: String,
+    /// Pinned endpoint (`--peer`, `ip:port`): skip the scan for a known-good
+    /// address. Only sent for Auto/MASQUE/WireGuard — gool's hops have their
+    /// own settings below, and naming a hop auto-selects its protocol.
+    #[serde(default)]
+    pub peer: String,
+    /// Pinned WireGuard peer (`--wg-peer`): the warp-in-warp outer hop.
+    /// Only sent for WireGuard/gool.
+    #[serde(default)]
+    pub wg_peer: String,
+    /// Pinned WARP-in-WARP hops (`--wiw-outer` / `--wiw-inner`, `ip:port`).
+    /// Name both and no scan runs at all; name one and the scan finds the
+    /// other. Only sent for gool.
+    #[serde(default)]
+    pub wiw_outer: String,
+    #[serde(default)]
+    pub wiw_inner: String,
+    /// Pinned MASQUE-in-MASQUE hops (`--mim-outer` / `--mim-inner`).
+    /// Only sent for mim.
+    #[serde(default)]
+    pub mim_outer: String,
+    #[serde(default)]
+    pub mim_inner: String,
     /// Local SOCKS5 listen address (`--bind`). Aether defaults to
     /// 127.0.0.1:1819; users can change the port or bind to 0.0.0.0 for LAN.
     #[serde(default = "default_bind_address")]
@@ -179,6 +233,12 @@ pub struct ConnectionProfile {
     pub route_block: String,
     #[serde(default)]
     pub route_direct: String,
+    /// Also send high-traffic Iranian destinations straight out
+    /// (`--route-direct` merged with the baked-in list below): domestic
+    /// sites and banking stay fast and reachable, and less traffic enters
+    /// the tunnel. Merged with `route_direct`, never replacing it.
+    #[serde(default)]
+    pub direct_iran: bool,
     /// Optional path to an Aether routing file with [block]/[direct] sections.
     #[serde(default)]
     pub routes_file: String,
@@ -199,6 +259,11 @@ pub struct ConnectionProfile {
     /// there.
     #[serde(default)]
     pub vpn_mode: bool,
+    /// MTU of the TUN adapter (`aether0`). 1500 is the default; PPPoE and
+    /// most Iranian last-miles are more stable at 1280–1420. Clamped to
+    /// 1280–9000 when the TUN is brought up.
+    #[serde(default = "default_tun_mtu")]
+    pub tun_mtu: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -230,6 +295,46 @@ fn default_http_proxy_address() -> String {
     "127.0.0.1:1820".into()
 }
 
+fn default_tun_mtu() -> u32 {
+    crate::tun::TUN_MTU
+}
+
+/// Baked-in `--route-direct` entries enabled by `direct_iran`: `private`
+/// covers LAN/loopback/CGNAT, the rest are high-traffic Iranian destinations
+/// (shops, video, banks of records) that stay faster and more reachable
+/// outside the tunnel.
+const IR_DIRECT_PRESET: &str = "private,digikala.com,aparat.com,filimo.com,telewebion.com,varzesh3.com,snapp.ir,cafebazaar.ir,divar.ir,namava.ir,shad.ir";
+
+/// Accept only `ip:port` — the core needs a port and resolves no names here,
+/// so hostnames and bare IPs are dropped rather than forwarded.
+fn validated_endpoint(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    t.parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|a| a.to_string())
+}
+
+/// Accept `n` or `a-b` of positive integers (fragment sizes/delays).
+fn validated_range(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = t.split('-').collect();
+    let ok = (parts.len() == 1 || parts.len() == 2)
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    if ok {
+        Some(t.to_string())
+    } else {
+        None
+    }
+}
+
 impl ConnectionProfile {
     /// CLI flags for Aether ≥1.1.1 — the whole profile is passed up front so
     /// the interactive prompts never appear (the PTY prompt-answering in
@@ -244,6 +349,7 @@ impl ConnectionProfile {
             Protocol::Masque => args.push("--masque".into()),
             Protocol::Wireguard => args.push("--wg".into()),
             Protocol::Gool => args.push("--gool".into()),
+            Protocol::Mim => args.push("--mim".into()),
         }
         args.push(match self.scan_mode {
             ScanMode::Turbo => "--turbo".into(),
@@ -265,12 +371,84 @@ impl ConnectionProfile {
         // Noize profile — pick the value matching the active protocol family.
         args.push("--noize".into());
         args.push(
-            match self.protocol {
-                Protocol::Auto | Protocol::Masque => self.masque_noize.as_flag(),
-                Protocol::Wireguard | Protocol::Gool => self.wg_noize.as_flag(),
+            if self.protocol.is_masque_family() {
+                self.masque_noize.as_flag()
+            } else {
+                self.wg_noize.as_flag()
             }
             .into(),
         );
+        // Endpoint pinning: skip the scan for known-good addresses. Each
+        // flag is only sent for the protocol family it belongs to — naming
+        // a hop auto-selects its protocol in the core, so an unfiltered
+        // forward could silently switch protocols underneath the user.
+        match self.protocol {
+            Protocol::Auto | Protocol::Masque | Protocol::Wireguard => {
+                if let Some(addr) = validated_endpoint(&self.peer) {
+                    args.push("--peer".into());
+                    args.push(addr);
+                }
+            }
+            _ => {}
+        }
+        match self.protocol {
+            Protocol::Wireguard | Protocol::Gool => {
+                if let Some(addr) = validated_endpoint(&self.wg_peer) {
+                    args.push("--wg-peer".into());
+                    args.push(addr);
+                }
+            }
+            _ => {}
+        }
+        if self.protocol == Protocol::Gool {
+            if let Some(addr) = validated_endpoint(&self.wiw_outer) {
+                args.push("--wiw-outer".into());
+                args.push(addr);
+            }
+            if let Some(addr) = validated_endpoint(&self.wiw_inner) {
+                args.push("--wiw-inner".into());
+                args.push(addr);
+            }
+        }
+        if self.protocol == Protocol::Mim {
+            if let Some(addr) = validated_endpoint(&self.mim_outer) {
+                args.push("--mim-outer".into());
+                args.push(addr);
+            }
+            if let Some(addr) = validated_endpoint(&self.mim_inner) {
+                args.push("--mim-inner".into());
+                args.push(addr);
+            }
+        }
+        // WireGuard keepalive: keep NAT bindings (notably mobile CGNAT)
+        // from expiring on idle UDP. Empty keeps the core default (5s).
+        if matches!(self.protocol, Protocol::Wireguard | Protocol::Gool) {
+            let k = self.wg_keepalive.trim();
+            if !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit()) {
+                args.push("--keepalive".into());
+                args.push(k.into());
+            }
+        }
+        // MASQUE evasion: ClientHello fragmentation (HTTP/2 carrier) and
+        // Encrypted Client Hello hide the SNI from DPI. MASQUE-family only.
+        if self.protocol.is_masque_family() {
+            if self.fragment {
+                args.push("--fragment".into());
+                if let Some(v) = validated_range(&self.fragment_size) {
+                    args.push("--fragment-size".into());
+                    args.push(v);
+                }
+                if let Some(v) = validated_range(&self.fragment_delay) {
+                    args.push("--fragment-delay".into());
+                    args.push(v);
+                }
+            }
+            let ech = self.ech.trim();
+            if !ech.is_empty() {
+                args.push("--ech".into());
+                args.push(ech.into());
+            }
+        }
         // Only forward --bind when non-default and parseable.
         if self.bind_address != default_bind_address()
             && self.bind_address.parse::<std::net::SocketAddr>().is_ok()
@@ -304,9 +482,20 @@ impl ConnectionProfile {
             args.push("--route-block".into());
             args.push(self.route_block.trim().into());
         }
-        if !self.route_direct.trim().is_empty() {
-            args.push("--route-direct".into());
-            args.push(self.route_direct.trim().into());
+        {
+            // The Iran preset merges with — never replaces — the user's own
+            // direct list, so custom entries and the preset compose.
+            let mut direct = self.route_direct.trim().to_string();
+            if self.direct_iran {
+                if !direct.is_empty() {
+                    direct.push(',');
+                }
+                direct.push_str(IR_DIRECT_PRESET);
+            }
+            if !direct.is_empty() {
+                args.push("--route-direct".into());
+                args.push(direct);
+            }
         }
         if !self.routes_file.trim().is_empty() {
             args.push("--routes".into());
@@ -365,6 +554,17 @@ impl Default for ConnectionProfile {
             masque_http2: false,
             masque_noize: MasqueNoize::Firewall,
             wg_noize: WgNoize::Balanced,
+            wg_keepalive: String::new(),
+            peer: String::new(),
+            wg_peer: String::new(),
+            wiw_outer: String::new(),
+            wiw_inner: String::new(),
+            mim_outer: String::new(),
+            mim_inner: String::new(),
+            fragment: false,
+            fragment_size: String::new(),
+            fragment_delay: String::new(),
+            ech: String::new(),
             bind_address: default_bind_address(),
             http_proxy_enabled: false,
             http_proxy_address: default_http_proxy_address(),
@@ -378,10 +578,12 @@ impl Default for ConnectionProfile {
             zero_trust_gateway: false,
             route_block: String::new(),
             route_direct: String::new(),
+            direct_iran: false,
             routes_file: String::new(),
             autostart: false,
             auto_connect: false,
             vpn_mode: false,
+            tun_mtu: default_tun_mtu(),
         }
     }
 }
@@ -493,6 +695,19 @@ mod tests {
         assert!(!p.autostart);
         assert!(!p.auto_connect);
         assert!(!p.vpn_mode);
+        assert!(p.peer.is_empty());
+        assert!(p.wg_peer.is_empty());
+        assert!(p.wiw_outer.is_empty());
+        assert!(p.wiw_inner.is_empty());
+        assert!(p.mim_outer.is_empty());
+        assert!(p.mim_inner.is_empty());
+        assert!(!p.fragment);
+        assert!(p.fragment_size.is_empty());
+        assert!(p.fragment_delay.is_empty());
+        assert!(p.ech.is_empty());
+        assert!(!p.direct_iran);
+        assert_eq!(p.tun_mtu, 1500);
+        assert!(p.wg_keepalive.is_empty());
     }
 
     #[test]
@@ -602,5 +817,180 @@ mod tests {
         };
         let args = p.as_args();
         assert!(!args.iter().any(|a| a == "--mark"), "args={args:?}");
+    }
+
+    fn flag_value(args: &[String], flag: &str) -> Option<String> {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1).cloned())
+    }
+
+    #[test]
+    fn default_emits_none_of_the_new_flags() {
+        let args = ConnectionProfile::default().as_args();
+        for f in [
+            "--peer",
+            "--wg-peer",
+            "--wiw-outer",
+            "--wiw-inner",
+            "--mim-outer",
+            "--mim-inner",
+            "--mim",
+            "--fragment",
+            "--fragment-size",
+            "--fragment-delay",
+            "--ech",
+            "--keepalive",
+        ] {
+            assert!(!args.iter().any(|a| a == f), "{f} leaked: {args:?}");
+        }
+        assert!(!args.iter().any(|a| a == "--route-direct"), "args={args:?}");
+    }
+
+    #[test]
+    fn peer_pin_emitted_for_masque_and_validated() {
+        let p = ConnectionProfile {
+            protocol: Protocol::Masque,
+            peer: "162.159.196.1:443".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            flag_value(&p.as_args(), "--peer").as_deref(),
+            Some("162.159.196.1:443")
+        );
+        // Hostnames and bare IPs are dropped, never forwarded.
+        for bad in ["example.com:443", "162.159.196.1", "not an address", ""] {
+            let p = ConnectionProfile {
+                peer: bad.into(),
+                ..Default::default()
+            };
+            assert!(
+                flag_value(&p.as_args(), "--peer").is_none(),
+                "bad peer {bad:?} leaked"
+            );
+        }
+    }
+
+    #[test]
+    fn peer_pin_never_leaks_across_protocol_families() {
+        // --peer on gool could hand hop selection to the wrong flag set.
+        let p = ConnectionProfile {
+            protocol: Protocol::Gool,
+            peer: "162.159.196.1:443".into(),
+            wiw_outer: "162.159.192.1:2408".into(),
+            wiw_inner: "188.114.96.1:2408".into(),
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(flag_value(&args, "--peer").is_none(), "args={args:?}");
+        assert_eq!(
+            flag_value(&args, "--wiw-outer").as_deref(),
+            Some("162.159.192.1:2408")
+        );
+        assert_eq!(
+            flag_value(&args, "--wiw-inner").as_deref(),
+            Some("188.114.96.1:2408")
+        );
+    }
+
+    #[test]
+    fn mim_selects_mim_flag_and_masque_noize() {
+        let p = ConnectionProfile {
+            protocol: Protocol::Mim,
+            mim_outer: "162.159.192.1:443".into(),
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(args.iter().any(|a| a == "--mim"), "args={args:?}");
+        assert_eq!(
+            flag_value(&args, "--mim-outer").as_deref(),
+            Some("162.159.192.1:443")
+        );
+        assert_eq!(flag_value(&args, "--noize").as_deref(), Some("firewall"));
+        assert_eq!(Protocol::Mim.as_menu_choice(), "4");
+    }
+
+    #[test]
+    fn fragment_and_ech_stay_in_masque_family() {
+        let p = ConnectionProfile {
+            protocol: Protocol::Masque,
+            fragment: true,
+            fragment_size: "8-16".into(),
+            fragment_delay: "1-5".into(),
+            ech: "auto".into(),
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(args.iter().any(|a| a == "--fragment"), "args={args:?}");
+        assert_eq!(
+            flag_value(&args, "--fragment-size").as_deref(),
+            Some("8-16")
+        );
+        assert_eq!(
+            flag_value(&args, "--fragment-delay").as_deref(),
+            Some("1-5")
+        );
+        assert_eq!(flag_value(&args, "--ech").as_deref(), Some("auto"));
+        // Garbage ranges fall back to core defaults (flag without value).
+        let p = ConnectionProfile {
+            fragment_size: "abc".into(),
+            ..p
+        };
+        assert!(flag_value(&p.as_args(), "--fragment-size").is_none());
+        // WireGuard has no ClientHello to fragment.
+        let p = ConnectionProfile {
+            protocol: Protocol::Wireguard,
+            fragment: true,
+            ech: "auto".into(),
+            ..Default::default()
+        };
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--fragment"), "args={args:?}");
+        assert!(flag_value(&args, "--ech").is_none(), "args={args:?}");
+    }
+
+    #[test]
+    fn keepalive_emitted_for_wireguard_only() {
+        let p = ConnectionProfile {
+            protocol: Protocol::Gool,
+            wg_keepalive: "25".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            flag_value(&p.as_args(), "--keepalive").as_deref(),
+            Some("25")
+        );
+        let p = ConnectionProfile {
+            protocol: Protocol::Masque,
+            wg_keepalive: "25".into(),
+            ..Default::default()
+        };
+        assert!(flag_value(&p.as_args(), "--keepalive").is_none());
+        let p = ConnectionProfile {
+            protocol: Protocol::Wireguard,
+            wg_keepalive: "soon".into(),
+            ..Default::default()
+        };
+        assert!(flag_value(&p.as_args(), "--keepalive").is_none());
+    }
+
+    #[test]
+    fn iran_preset_merges_with_user_direct_list() {
+        // Preset alone.
+        let p = ConnectionProfile {
+            direct_iran: true,
+            ..Default::default()
+        };
+        let v = flag_value(&p.as_args(), "--route-direct").expect("missing");
+        assert!(v.starts_with("private,"), "{v}");
+        assert!(v.contains("snapp.ir"), "{v}");
+        // User entries compose in front, never replaced.
+        let p = ConnectionProfile {
+            route_direct: "mybank.ir".into(),
+            direct_iran: true,
+            ..Default::default()
+        };
+        let v = flag_value(&p.as_args(), "--route-direct").expect("missing");
+        assert!(v.starts_with("mybank.ir,private,"), "{v}");
     }
 }

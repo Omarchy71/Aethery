@@ -347,8 +347,13 @@ fn monitor_connect(
                     .as_ref()
                     .map(|s| s.pid())
                     .unwrap_or(0);
-                let up =
-                    crate::tun::bring_up(&app, &profile.bind_address, &profile.dns, aether_pid);
+                let up = crate::tun::bring_up(
+                    &app,
+                    &profile.bind_address,
+                    &profile.dns,
+                    aether_pid,
+                    profile.tun_mtu,
+                );
                 if up {
                     new_state = ConnectionState::Connected {
                         socks_addr: profile.bind_address.clone(),

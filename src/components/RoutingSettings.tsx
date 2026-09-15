@@ -1,4 +1,5 @@
 import { useConnectionStore } from "@/state/connectionStore"
+import { Switch } from "@/components/ui/switch"
 
 const INPUT =
   "h-8 w-full rounded-md bg-black/20 px-2 text-xs text-foreground ring-1 ring-white/10 outline-none focus:ring-primary disabled:opacity-50"
@@ -13,6 +14,8 @@ export function RoutingSettings() {
   const setDns = useConnectionStore((s) => s.setDns)
   const setRouteBlock = useConnectionStore((s) => s.setRouteBlock)
   const setRouteDirect = useConnectionStore((s) => s.setRouteDirect)
+  const directIran = useConnectionStore((s) => s.profile.direct_iran)
+  const setDirectIran = useConnectionStore((s) => s.setDirectIran)
   const setRoutesFile = useConnectionStore((s) => s.setRoutesFile)
   const locked = status.state !== "Idle" && status.state !== "Error"
 
@@ -43,6 +46,20 @@ export function RoutingSettings() {
         className={AREA}
         aria-label="Direct routes"
       />
+      <div className="flex items-center justify-between px-1">
+        <span
+          className="text-[11px] text-muted-foreground"
+          title="Sends high-traffic Iranian destinations (shops, video, banks) straight out instead of through the tunnel — faster domestic traffic, less load on the tunnel. Merges with your Direct list above."
+        >
+          Direct Iranian sites
+        </span>
+        <Switch
+          checked={directIran}
+          onCheckedChange={setDirectIran}
+          disabled={locked}
+          aria-label="Direct Iranian sites"
+        />
+      </div>
       <input
         type="text"
         value={profile.routes_file}
