@@ -69,8 +69,13 @@ const HEV_LOG_FILE: &str = "hev.log";
 /// Also the handoff the elevated launcher uses to report its exit code.
 #[cfg(target_os = "windows")]
 const WIN_LOG_FILE: &str = "tun-last.log";
+/// Per-operation sentinel files: up and down each wait on their own, so a
+/// teardown racing an in-flight setup can never consume the other's exit
+/// code (both used to share one file, and each run deleted it on start).
 #[cfg(target_os = "windows")]
-const WIN_EXIT_FILE: &str = "tun-exit.code";
+const WIN_UP_EXIT_FILE: &str = "tun-up-exit.code";
+#[cfg(target_os = "windows")]
+const WIN_DOWN_EXIT_FILE: &str = "tun-down-exit.code";
 /// Exit code the elevated launcher reports when the UAC prompt is declined.
 #[cfg(target_os = "windows")]
 const UAC_CANCELLED_CODE: i32 = 1223;
@@ -143,7 +148,7 @@ fn resolve_script(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("VPN helper script missing: scripts/{name}"))
 }
 
-fn emit_log(app: &AppHandle, line: String) {
+pub(crate) fn emit_log(app: &AppHandle, line: String) {
     let _ = app.emit(
         LOG_EVENT,
         &LogEvent {
@@ -366,18 +371,19 @@ fn ps_quote(s: &str) -> String {
 /// `Start-Process -Verb RunAs` can't pipe the elevated child's stdout back
 /// across the UAC boundary (and its `-Wait` is unreliable for elevated
 /// targets), so completion is signalled with a sentinel file: the script
-/// always writes `<data>\tun-exit.code` last, and logs every line to
+/// always writes `<data>\<exit_name>` last, and logs every line to
 /// `<data>\tun-last.log`, which is replayed into the app log here.
 #[cfg(target_os = "windows")]
 fn run_elevated(
     app: &AppHandle,
     script: &Path,
     args: &[String],
+    exit_name: &str,
     timeout_secs: u64,
 ) -> Result<String, String> {
     let data = data_dir(app);
     let log_file = data.join(WIN_LOG_FILE);
-    let exit_file = data.join(WIN_EXIT_FILE);
+    let exit_file = data.join(exit_name);
     let _ = std::fs::remove_file(&log_file);
     let _ = std::fs::remove_file(&exit_file);
 
@@ -498,6 +504,7 @@ pub fn bring_up(
     // NOTE: no early return when already up — bypass routes belong to the old
     // session's gateway IPs (tun-up.ps1 always rebuilds them from the live
     // sockets for exactly this reason).
+    let _op = TUN_OP.lock().unwrap();
     let hev = match resolve_hev(app) {
         Ok(p) => p,
         Err(e) => {
@@ -555,7 +562,7 @@ pub fn bring_up(
         ]
     };
     #[cfg(target_os = "windows")]
-    let result = run_elevated(app, &script, &args, 120);
+    let result = run_elevated(app, &script, &args, WIN_UP_EXIT_FILE, 120);
     #[cfg(unix)]
     let result = run_privileged(app, &script, &args, 120);
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -585,7 +592,19 @@ pub fn bring_up(
     }
 }
 
+/// Serializes TUN setup against teardown: Aether's monitor thread runs
+/// `bring_up` (up to 120s under UAC) while the UI thread may call
+/// `bring_down` at any moment. Separate sentinel files plus this lock keep
+/// the two elevated scripts from ever running concurrently.
+static TUN_OP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Tear the TUN down. Best-effort and prompt-free when already down.
+///
+/// Non-blocking: if a setup is in flight, the teardown is skipped here and
+/// left to the setup's completion path (monitor_connect checks
+/// `user_requested_stop` right after `bring_up` and undoes the TUN itself).
+/// Blocking would hang the UI's disconnect button behind the setup's UAC
+/// window; tearing down concurrently would race the two scripts.
 pub fn bring_down(app: &AppHandle) {
     if !SUPPORTED {
         return;
@@ -593,6 +612,13 @@ pub fn bring_down(app: &AppHandle) {
     if !pid_alive(&data_dir(app)) && !iface_exists() {
         return;
     }
+    let Ok(_op) = TUN_OP.try_lock() else {
+        emit_log(
+            app,
+            "[tun] setup in flight — teardown deferred to its completion".into(),
+        );
+        return;
+    };
     let script_name = if cfg!(target_os = "windows") {
         "tun-down.ps1"
     } else {
@@ -616,7 +642,7 @@ pub fn bring_down(app: &AppHandle) {
         ]
     };
     #[cfg(target_os = "windows")]
-    let result = run_elevated(app, &script, &args, 60);
+    let result = run_elevated(app, &script, &args, WIN_DOWN_EXIT_FILE, 60);
     #[cfg(unix)]
     let result = run_privileged(app, &script, &args, 30);
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -625,6 +651,27 @@ pub fn bring_down(app: &AppHandle) {
         Ok(_) => emit_log(app, format!("[tun] {TUN_NAME} down — routes/DNS restored")),
         Err(e) => emit_log(app, format!("[tun] teardown issue ({e})")),
     }
+}
+
+/// Blocking variant for process exit: quitting with the VPN up must remove
+/// the TUN default route, or all system traffic keeps flowing into a tunnel
+/// whose proxy is dead. Waits briefly for an in-flight setup (a UAC prompt
+/// the user is answering) instead of racing it, then tears down.
+pub fn bring_down_blocking(app: &AppHandle) {
+    if !SUPPORTED {
+        return;
+    }
+    if !pid_alive(&data_dir(app)) && !iface_exists() {
+        return;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while TUN_OP.try_lock().is_err() {
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    bring_down(app);
 }
 
 #[cfg(test)]

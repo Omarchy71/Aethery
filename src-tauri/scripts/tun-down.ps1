@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $LogFile   = Join-Path $StateDir 'tun-last.log'
 $PidFile   = Join-Path $StateDir 'hev.pid'
 $StateFile = Join-Path $StateDir 'tun-net.json'
-$ExitFile  = Join-Path $StateDir 'tun-exit.code'
+$ExitFile  = Join-Path $StateDir 'tun-down-exit.code'
 
 if (Test-Path $LogFile)  { Remove-Item $LogFile -Force -ErrorAction SilentlyContinue }
 if (Test-Path $ExitFile) { Remove-Item $ExitFile -Force -ErrorAction SilentlyContinue }

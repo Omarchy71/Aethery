@@ -74,6 +74,10 @@ fn main() {
         .expect("error building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                // TUN first, while elevation can still prompt: otherwise the
+                // default route keeps pointing into a tunnel whose proxy is
+                // dead and the machine loses its network after quit.
+                tun::bring_down_blocking(app_handle);
                 let state = app_handle.state::<AppState>();
                 let data_dir = app_handle
                     .path()

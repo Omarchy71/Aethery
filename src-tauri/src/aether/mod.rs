@@ -354,6 +354,19 @@ fn monitor_connect(
                     aether_pid,
                     profile.tun_mtu,
                 );
+                // The setup took an unbounded time under UAC; the user may
+                // have hit disconnect meanwhile. Never announce Connected
+                // over a session that's going away — undo the TUN instead
+                // (the disconnect waiter owns the transition to Idle).
+                let stopped = manager.lock().unwrap().user_requested_stop;
+                if stopped {
+                    crate::tun::bring_down(&app);
+                    crate::tun::emit_log(
+                        &app,
+                        "[tun] connect cancelled during setup — tunnel undone".into(),
+                    );
+                    return;
+                }
                 if up {
                     new_state = ConnectionState::Connected {
                         socks_addr: profile.bind_address.clone(),
@@ -463,7 +476,7 @@ pub fn request_disconnect(
     app: &AppHandle,
     manager: &Arc<Mutex<AetherManager>>,
 ) -> Result<(), AetherError> {
-    // VPN layer first (privileged teardown, one polkit prompt) so no packet
+    // VPN layer first (privileged teardown, one UAC prompt) so no packet
     // keeps a TUN path once the proxy underneath is going away.
     crate::tun::bring_down(app);
     let had_session = {
