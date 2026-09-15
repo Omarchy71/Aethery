@@ -1,0 +1,68 @@
+name: build-windows
+
+# Windows-only builds for Aethery. Two triggers:
+#   workflow_dispatch — manual run, uploads setup.exe + msi as run artifacts.
+#   push tag "v*-win" (e.g. v0.9.1-win) — builds + attaches setup.exe + msi
+#     to a draft GitHub release. Publish the draft once CI is green.
+#
+# The Aether core binary is fetched from the same version pin as every other
+# track (src-tauri/binaries/fetch-aether.sh → AETHER_VERSION), so the Windows
+# build always ships the latest pinned core.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*-win"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # fetch-aether.sh is unix-only (tar.gz assets); the Windows asset is a
+      # zip, fetched here with the same version pin and checksum verification.
+      - name: Fetch Aether core (Windows)
+        shell: pwsh
+        run: |
+          $pin = (Select-String -Path src-tauri/binaries/fetch-aether.sh -Pattern 'AETHER_VERSION="(.+)"').Matches[0].Groups[1].Value
+          $base = "https://github.com/CluvexStudio/Aether/releases/download/$pin"
+          curl.exe -sL -o aether.zip "$base/aether-windows-x86_64.zip"
+          curl.exe -sL -o SHA256SUMS.txt "$base/SHA256SUMS.txt"
+          $expected = ((Get-Content SHA256SUMS.txt | Select-String 'aether-windows-x86_64.zip') -split '\s+')[0]
+          $actual = (Get-FileHash aether.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "Checksum mismatch: $actual != $expected" }
+          Expand-Archive aether.zip -DestinationPath aether-extract
+          Move-Item aether-extract/aether.exe src-tauri/binaries/aether.exe
+
+      - run: npm ci
+
+      - name: Build bundles (nsis, msi)
+        run: npx tauri build --bundles nsis,msi
+
+      - name: Attach bundles to draft release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-windows-x86_64
+          path: |
+            src-tauri/target/**/bundle/**/*setup.exe
+            src-tauri/target/**/bundle/**/*.msi
