@@ -29,10 +29,16 @@ fn main() {
             // same port.
             aether::orphan::reap_orphan(&data_dir);
             focus::spawn_watcher(app.handle().clone());
-            tray::init(app)?;
+            // Best-effort on Linux: many Omarchy/Hyprland setups run without
+            // a StatusNotifier/hosted tray, and tray init failing must not
+            // take the whole app down — the window remains fully usable.
+            if let Err(e) = tray::init(app) {
+                eprintln!("[aethery] tray unavailable, continuing without it: {e}");
+            }
             // "Start minimized" preference: open directly into the taskbar
             // so a boot/autostart launch stays out of the user's way.
-            // The tray icon (always created above) remains the way back.
+            // When the tray is available it remains the way back;
+            // without one the taskbar entry does.
             if tray::get_start_minimized() {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.minimize();

@@ -39,6 +39,14 @@ Grab the latest installer from the [Releases page](https://github.com/MatinSenPa
 
 Windows x64 only for now — see [Building from source](#building-from-source) for other platforms.
 
+### Omarchy / Arch Linux
+
+This fork ships a Linux-only track (`0.8.4+`, identifier `io.github.omarchy71.aethery`):
+
+- `npm run build:omarchy` — native build on your machine, no sudo needed (AppImage + deb in `src-tauri/target/release/bundle/`). The AppImage runs install-free.
+- CI: `.github/workflows/build-omarchy.yml` — `portable` (Ubuntu glibc, runs anywhere) and `arch-native` (current Arch toolchain) AppImages; push an `omarchy-v*` tag to draft a release.
+- Notes: the tray icon is best-effort — on Hyprland setups without a StatusNotifier host the app still starts and runs from its window/taskbar entry. "Start on boot" writes `~/.config/autostart/io.github.omarchy71.aethery.desktop`.
+
 ## Building from source
 
 1. **Prerequisites**
