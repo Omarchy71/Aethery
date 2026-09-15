@@ -74,7 +74,48 @@ jobs:
       - name: Fetch Aether core
         run: bash src-tauri/binaries/fetch-aether.sh
 
+      - name: Pre-seed linuxdeploy gtk plugin (Arch fixes)
+        # Same two Arch breakages hit locally (see scripts/build-omarchy.sh):
+        #  1. gdk-pixbuf2 ships no loader dir -> `cp: cannot stat ...` aborts
+        #     the plugin (set -e). Guard the copy + cache-file sed.
+        #  2. fresh cache lacks the loaders.cache parent dir -> mkdir it.
+        # Pre-seed the patched plugin into the bundler cache; tauri reuses
+        # cached files instead of downloading a fresh (unpatched) copy.
+        run: |
+          mkdir -p ~/.cache/tauri
+          curl -sSL --max-time 120 -o ~/.cache/tauri/linuxdeploy-plugin-gtk.sh \
+            https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          python3 - <<'EOF'
+          import os
+          p = os.path.expanduser("~/.cache/tauri/linuxdeploy-plugin-gtk.sh")
+          src = open(p).read()
+          src = src.replace(
+              'copy_tree "$gdk_pixbuf_binarydir" "$APPDIR/"',
+              'if [ -e "$gdk_pixbuf_binarydir" ]; then\n'
+              '    copy_tree "$gdk_pixbuf_binarydir" "$APPDIR/"\n'
+              'else\n'
+              '    echo "WARNING: $gdk_pixbuf_binarydir not found, skipping pixbuf loader copy"\n'
+              'fi',
+          ).replace(
+              'sed -i "s|$gdk_pixbuf_moduledir/||g" "$APPDIR/$gdk_pixbuf_cache_file"',
+              'if [ -f "$APPDIR/$gdk_pixbuf_cache_file" ]; then\n'
+              '    sed -i "s|$gdk_pixbuf_moduledir/||g" "$APPDIR/$gdk_pixbuf_cache_file"\n'
+              'fi',
+          ).replace(
+              'echo "Updating pixbuf cache in $APPDIR/$gdk_pixbuf_cache_file"\n',
+              'echo "Updating pixbuf cache in $APPDIR/$gdk_pixbuf_cache_file"\n'
+              '    mkdir -p "$(dirname "$APPDIR/$gdk_pixbuf_cache_file")"\n',
+              1,
+          )
+          open(p, "w").write(src)
+          print("pre-seeded patched gtk plugin")
+          EOF
+
       - name: Build frontend + AppImage
+        env:
+          # Arch libs use RELR relocations the linuxdeploy-bundled `strip`
+          # cannot parse — skip stripping (same as scripts/build-omarchy.sh).
+          NO_STRIP: "1"
         run: |
           npm ci
           npm run build
